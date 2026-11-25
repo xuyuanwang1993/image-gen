@@ -86,6 +86,12 @@ else
   docker compose build manager
   ok "manager 镜像就绪"
 
+  if ! docker image inspect "${SEGMENTER_IMAGE:-image-gen-segmenter:local}" >/dev/null 2>&1; then
+    echo "  构建分割镜像（Node + onnxruntime，首次约 2~4 分钟）"
+    docker compose build segmenter
+  fi
+  ok "分割镜像就绪"
+
   if ! docker image inspect "${DIAGRAM_IMAGE:-image-gen-diagram:local}" >/dev/null 2>&1; then
     echo "  构建流程图镜像（Mermaid + Graphviz，首次约 2~4 分钟）"
     docker compose build diagram
@@ -125,6 +131,16 @@ step "5/6 启动服务"
 # ---------------------------------------------------------------------------
 docker compose up -d
 ok "容器已启动"
+
+# 预热分割模型（约 29MB），避免第一次点「自动选区」再等下载
+if docker compose exec -T segmenter true >/dev/null 2>&1; then
+  echo -n "  预热分割模型（自动选区用）"
+  if timeout 300 docker compose exec -T segmenter node warm.mjs >/dev/null 2>&1; then
+    echo " ok"
+  else
+    echo " 跳过（首次点「自动选区」时会自动下载）"
+  fi
+fi
 
 PORT="$(grep -E '^SDCPP_PORT=' .env | tail -1 | cut -d= -f2- || true)"
 PORT="${PORT:-18234}"

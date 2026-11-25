@@ -14,7 +14,7 @@ DOCKER_CONFIG ?= $(shell [ -w "$$HOME/.docker" ] && echo "$$HOME/.docker" || ech
 export DOCKER_CONFIG
 
 .PHONY: help prepare up down restart logs logs-diagram ps test pull-models models fetch-image \
-        build-diagram build-manager gen flow perms status model model-real model-anime
+        build-diagram build-manager build-segmenter gen flow perms status model model-real model-anime
 
 help:
 	@echo "make prepare       一键预准备：写 .env、建镜像、下权重、启动、冒烟（首次部署用这个）"
@@ -28,6 +28,7 @@ help:
 	@echo "make fetch-image   拉取 sd.cpp CUDA 镜像（绕过 docker pull 卡顿）"
 	@echo "make build-diagram 构建画图镜像（Mermaid + Graphviz）"
 	@echo "make build-manager 构建模型切换控制面镜像"
+	@echo "make build-segmenter 构建自动选区（分割）镜像"
 	@echo "make pull-models   下载/校验权重（MODEL=real|anime|all，分片并行）"
 	@echo "make models        列出 config/models.json 里的模型和磁盘状态"
 	@echo "make test          冒烟测试（探活 + 出一张 768x768）"
@@ -71,6 +72,9 @@ build-diagram:
 
 build-manager:
 	docker compose build manager
+
+build-segmenter:
+	docker compose build segmenter
 
 pull-models:
 	./scripts/download-models.sh

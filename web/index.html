@@ -170,9 +170,24 @@
       <input id="denoise" type="range" min="0.1" max="0.95" step="0.05" value="0.6">
       <p class="hint" style="margin-top:6px">0.3~0.45 换风格 / 调色；0.5~0.7 换元素、换场景；0.75+ 基本只借构图。</p>
 
-      <!-- 遮罩：只重绘涂到的区域，换衣服 / 换背景用这个 -->
+      <!-- 遮罩：只重绘选中的区域，换衣服 / 换背景用这个 -->
       <div id="maskBox" hidden>
-        <label style="margin-top:12px">遮罩 <span class="sub">（默认矩形框选：直接拖一个框把要改的地方框住；也可切画笔精修）</span></label>
+        <label style="margin-top:12px">遮罩 <span class="sub">（推荐直接「自动选区」；也可框选/画笔精修）</span></label>
+        <div class="row" style="margin-bottom:8px">
+          <select id="segClass">
+            <option value="upper">上衣</option>
+            <option value="lower">下装（裤/裙）</option>
+            <option value="dress">连衣裙</option>
+            <option value="garment">整套衣物</option>
+            <option value="shoes">鞋</option>
+            <option value="person">人物（整体）</option>
+            <option value="skin">皮肤（脸/手/腿）</option>
+            <option value="hair">头发</option>
+            <option value="accessory">配饰（包/帽/围巾）</option>
+            <option value="background">背景</option>
+          </select>
+          <button type="button" class="mini" id="segBtn" style="flex:0 0 auto">自动选区</button>
+        </div>
         <div class="mask-wrap"><canvas id="maskCanvas"></canvas></div>
         <div class="row" style="margin-top:8px">
           <div>
@@ -190,7 +205,7 @@
           </div>
         </div>
         <button type="button" class="mini" id="maskClear" style="margin-top:8px">清除遮罩</button>
-        <p class="hint" style="margin-top:6px">框选可以叠加多个框；换衣服把整件衣服框进去、脸别框。框小一点更稳，边缘切一半会得到「半件新衣」。</p>
+        <p class="hint" style="margin-top:6px">自动选区识别的是整块语义区域（比如整件衣服）；想只改一部分，再用框选/橡皮修。第一次点会下载约 29MB 的分割模型。</p>
       </div>
     </div>
 
@@ -571,6 +586,7 @@ async function loadInitImage(file) {
 
 /* ===== 遮罩：白=重绘，黑=保留（接口的 mask 字段） ===== */
 let maskCanvas = null, maskCtx = null, dispCanvas = null, dispCtx = null;
+let tintCanvas = null, tintCtx = null;
 let maskBaseImg = null, MASK_DIRTY = false, drawing = false, lastPt = null;
 let shapeStart = null, shapeCur = null, shapeTool = null;
 
@@ -578,11 +594,10 @@ function setupMask() {
   if (!INIT) return;
   const w = INIT.width, h = INIT.height;
 
-  maskCanvas = document.createElement('canvas');       // 黑白遮罩，白=重绘
+  maskCanvas = document.createElement('canvas');       // 透明底 + 白色笔迹（导出时再压成黑底）
   maskCanvas.width = w; maskCanvas.height = h;
   maskCtx = maskCanvas.getContext('2d');
-  maskCtx.fillStyle = '#000';
-  maskCtx.fillRect(0, 0, w, h);
+  maskCtx.clearRect(0, 0, w, h);
 
   dispCanvas = $('maskCanvas');                        // 显示层：图 + 半透明遮罩
   dispCanvas.width = w; dispCanvas.height = h;
@@ -612,8 +627,20 @@ function drawMaskView() {
   const w = dispCanvas.width, h = dispCanvas.height;
   dispCtx.clearRect(0, 0, w, h);
   if (maskBaseImg) dispCtx.drawImage(maskBaseImg, 0, 0, w, h);
-  dispCtx.globalAlpha = 0.55;
-  dispCtx.drawImage(maskCanvas, 0, 0);
+
+  // 遮罩用半透明红色高亮：白 mask 乘红再叠上去，白衬衫/白背景上也能一眼看清
+  if (!tintCanvas) { tintCanvas = document.createElement('canvas'); tintCtx = tintCanvas.getContext('2d'); }
+  if (tintCanvas.width !== w || tintCanvas.height !== h) { tintCanvas.width = w; tintCanvas.height = h; }
+  tintCtx.globalCompositeOperation = 'source-over';
+  tintCtx.clearRect(0, 0, w, h);
+  tintCtx.fillStyle = '#ff3b3b';
+  tintCtx.fillRect(0, 0, w, h);
+  tintCtx.globalCompositeOperation = 'destination-in';
+  tintCtx.drawImage(maskCanvas, 0, 0);
+  tintCtx.globalCompositeOperation = 'source-over';
+
+  dispCtx.globalAlpha = 0.45;
+  dispCtx.drawImage(tintCanvas, 0, 0);
   dispCtx.globalAlpha = 1;
 
   if (shapeStart && shapeCur) {                        // 正在拖的框：虚线预览
@@ -636,9 +663,9 @@ function maskPoint(ev) {
 function paintAt(p) {
   const erase = $('brushMode').value === 'erase';
   const radius = Math.max(2, Number($('brushSize').value) * p.k / 2);
-  const color = erase ? '#000' : '#fff';
-  maskCtx.strokeStyle = color;
-  maskCtx.fillStyle = color;
+  maskCtx.globalCompositeOperation = erase ? 'destination-out' : 'source-over';
+  maskCtx.strokeStyle = '#fff';
+  maskCtx.fillStyle = '#fff';
   maskCtx.lineWidth = radius * 2;
   maskCtx.lineCap = 'round';
   maskCtx.lineJoin = 'round';
@@ -646,6 +673,7 @@ function paintAt(p) {
   maskCtx.moveTo(lastPt ? lastPt.x : p.x, lastPt ? lastPt.y : p.y);
   maskCtx.lineTo(p.x, p.y);
   maskCtx.stroke();
+  maskCtx.globalCompositeOperation = 'source-over';
   lastPt = {x: p.x, y: p.y};
   if (!erase) MASK_DIRTY = true;
   drawMaskView();
@@ -655,6 +683,7 @@ function commitShape() {
   if (!shapeStart || !shapeCur) return;
   const w = Math.abs(shapeStart.x - shapeCur.x), h = Math.abs(shapeStart.y - shapeCur.y);
   if (w < 4 || h < 4) return;                          // 只是点了一下，忽略
+  maskCtx.globalCompositeOperation = 'source-over';
   maskCtx.fillStyle = '#fff';
   drawShapePath(maskCtx, shapeStart, shapeCur, shapeTool);
   maskCtx.fill();
@@ -698,11 +727,79 @@ function bindMaskDrawing() {
 
 $('maskClear').onclick = () => {
   if (!maskCtx) return;
-  maskCtx.fillStyle = '#000';
-  maskCtx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
+  maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
   MASK_DIRTY = false;
   shapeStart = shapeCur = null;
   drawMaskView();
+};
+
+/* ===== 自动选区：调分割服务（/segment），按语义区域直接生成遮罩 ===== */
+const SEG_LABELS = {upper: '上衣', lower: '下装', dress: '连衣裙', garment: '整套衣物',
+  shoes: '鞋', person: '人物', skin: '皮肤', hair: '头发', accessory: '配饰', background: '背景'};
+let SEG_CACHE = {key: null, data: null, pending: null};
+
+function segCacheKey() {
+  return INIT ? `${INIT.width}x${INIT.height}:${INIT.b64.length}:${INIT.name}` : '';
+}
+
+async function requestSegments() {
+  const key = segCacheKey();
+  if (SEG_CACHE.key === key && SEG_CACHE.data) return SEG_CACHE.data;
+  if (SEG_CACHE.pending) return SEG_CACHE.pending;
+
+  SEG_CACHE.pending = (async () => {
+    const res = await fetch('/segment/segment', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({image: INIT.b64}),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    SEG_CACHE = {key, data, pending: null};
+    return data;
+  })();
+
+  try {
+    return await SEG_CACHE.pending;
+  } catch (e) {
+    SEG_CACHE.pending = null;
+    throw e;
+  }
+}
+
+$('segBtn').onclick = async () => {
+  if (!INIT) {
+    status.className = 'status err';
+    status.textContent = '先上传参考图';
+    return;
+  }
+  const cls = $('segClass').value;
+  const btn = $('segBtn');
+  btn.disabled = true;
+  status.className = 'status';
+  status.textContent = '正在识别…（首次需要加载模型，约 10~20 秒）';
+  try {
+    const data = await requestSegments();
+    const maskImg = await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = 'data:image/png;base64,' + data.masks[cls];
+    });
+    // 遮罩画布是透明底：先清空再画（服务端给的是带 alpha 的白色选区）
+    maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+    maskCtx.drawImage(maskImg, 0, 0, maskCanvas.width, maskCanvas.height);
+    MASK_DIRTY = true;
+    shapeStart = shapeCur = null;
+    drawMaskView();
+    status.className = 'status ok';
+    status.textContent = `已选中${SEG_LABELS[cls] || cls}（占画面 ${data.ratios[cls]}%，识别 ${data.ms}ms）`;
+  } catch (e) {
+    status.className = 'status err';
+    status.textContent = '自动选区失败：' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
 };
 
 const drop = $('drop');
@@ -767,7 +864,15 @@ go.onclick = async () => {
     body.init_images = [INIT.b64];
     body.denoising_strength = denoise;
     if (MASK_DIRTY && maskCanvas) {
-      body.mask = maskCanvas.toDataURL('image/png').split(',')[1];
+      // 内部遮罩是透明底，导出时压成黑底白字（接口约定：白=重绘）
+      const flat = document.createElement('canvas');
+      flat.width = maskCanvas.width;
+      flat.height = maskCanvas.height;
+      const fctx = flat.getContext('2d');
+      fctx.fillStyle = '#000';
+      fctx.fillRect(0, 0, flat.width, flat.height);
+      fctx.drawImage(maskCanvas, 0, 0);
+      body.mask = flat.toDataURL('image/png').split(',')[1];
     }
   }
 

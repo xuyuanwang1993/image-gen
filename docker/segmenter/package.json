@@ -1,0 +1,10 @@
+{
+  "name": "image-gen-segmenter",
+  "private": true,
+  "type": "module",
+  "description": "衣物/人物/背景分割服务（SegFormer-B2 clothes），给图生图的自动选区用",
+  "dependencies": {
+    "@huggingface/transformers": "4.3.2",
+    "pngjs": "^7.0.0"
+  }
+}

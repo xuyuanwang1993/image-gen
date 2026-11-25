@@ -27,7 +27,8 @@ image-gen/
 │   └── loras/                  # 放 LoRA .safetensors（可选）
 ├── docker/
 │   ├── diagram/                # 流程图渲染服务（Mermaid + Graphviz）
-│   └── manager/                # 模型切换控制面（python + docker CLI，网页按钮的后端）
+│   ├── manager/                # 模型切换控制面（python + docker CLI，网页按钮的后端）
+│   └── segmenter/              # 自动选区（SegFormer 衣物分割，Node + onnxruntime）
 ├── web/
 │   ├── index.html              # 生图页（切换按钮/预设由后端与 JSON 提供，不写死）
 │   ├── presets.json            # 提示词预设（按风格分组）
@@ -61,7 +62,7 @@ git clone <repo> && cd image-gen
 
 1. **环境检查**：docker / compose v2 / python3 / GPU（检测不到 GPU 只警告，CPU 也能跑）；
 2. **生成 `.env`**：从 `.env.example` 复制，并写入 `PROJECT_DIR`（manager 容器要按同路径挂载仓库）；
-3. **准备镜像**：拉 sd.cpp CUDA 镜像、构建 manager（首次还会构建流程图镜像）；
+3. **准备镜像**：拉 sd.cpp CUDA 镜像、构建 manager 和 segmenter（首次还会构建流程图镜像）；
 4. **下载权重**：按 `config/models.json` 的 `download` 字段分片并行下载、校验大小；
 5. **启动服务**：`docker compose up -d`，等待生图 API 就绪；
 6. **冒烟测试**：探活 + 出一张 768×768。
@@ -321,6 +322,33 @@ r = requests.post("http://127.0.0.1:18234/sdapi/v1/txt2img", json={
 open("out.png", "wb").write(base64.b64decode(r.json()["images"][0]))
 ```
 
+### 5.4 分割接口（自动选区背后的服务）
+
+`segmenter` 容器提供一个语义分割接口，输入一张 PNG，返回各区域的 mask（白色 + alpha 表示选区）：
+
+```bash
+curl -s -X POST http://127.0.0.1:18080/segment/segment \
+  -H 'Content-Type: application/json' \
+  -d '{"image": "<base64 png>"}' \
+  | python3 -c 'import sys,json,base64;d=json.load(sys.stdin);open("mask.png","wb").write(base64.b64decode(d["masks"]["upper"]))'
+```
+
+返回：
+
+```json
+{
+  "width": 832, "height": 1216, "ms": 1024,
+  "ratios": {"upper": 7.4, "lower": 6.5, "garment": 14.7, "person": 18.6, "background": 81.4},
+  "masks": {"upper": "<base64 png>", "lower": "...", "garment": "...", "person": "...", "...": "..."}
+}
+```
+
+可选的 key：`upper` 上衣、`lower` 下装、`dress` 连衣裙、`shoes` 鞋、`garment` 整套衣物、
+`accessory` 配饰、`person` 人物整体、`skin` 皮肤、`hair` 头发、`background` 背景。
+
+模型 `Xenova/segformer_b2_clothes`（q8，约 29MB）首次使用会下载到 `models/segformer/`；
+CPU 推理，单张 832×1216 约 1 秒，不占显存。
+
 ## 6. 网页
 
 <http://127.0.0.1:18080/> 打开就是生图页：
@@ -330,8 +358,10 @@ open("out.png", "wb").write(base64.b64decode(r.json()["images"][0]))
 - 参数面板顶部可以切 **文生图 / 图生图**：图生图支持点击或拖拽上传参考图，自动缩到最长边
   1280、按 8 对齐，并带「重绘幅度」滑杆；输出尺寸由参考图决定，不再用尺寸下拉框。
   上传后可随时点 **移除参考图** 清空重来，或直接再拖一张覆盖；
-- **遮罩（换衣服 / 换背景）**：上传参考图后拖一个矩形框（或切画笔）圈出要改的区域，
-  只重绘框到的部分，脸和背景原样保留；「橡皮」擦回、「清除遮罩」重来。不框则整图重绘；
+- **自动选区（推荐）**：上传参考图后选「上衣 / 下装 / 连衣裙 / 整套衣物 / 鞋 / 人物 / 皮肤 /
+  头发 / 配饰 / 背景」，点一下「自动选区」，分割服务直接生成遮罩（CPU 推理约 1 秒），
+  红色高亮就是会被重绘的区域；
+- **手动遮罩**：自动选区不准时，用矩形框选 / 椭圆 / 画笔 / 橡皮精修；不选则整图重绘；
 - **参数预设**：把当前整套参数（模式、提示词、负向、尺寸、步数、CFG、采样器、张数、重绘幅度）
   存成命名配置，存在后端 `data/presets.json` 里，换浏览器也还在；下拉选一个点「应用」即可套用，
   同名再保存会覆盖；
@@ -389,8 +419,8 @@ curl -s -X POST http://127.0.0.1:18235/presets/delete \
 ### 6.3 实操：换衣服 / 换背景
 
 1. 切到**图生图**，上传原图；
-2. 遮罩默认是**矩形框选**：直接拖一个框把整件衣服框住（可叠加多个框），脸和手别框；
-   边缘不准再切「画笔」补两笔，框多了用「橡皮」擦掉；
+2. 遮罩用 **自动选区**：选「上衣」→ 自动选区，一秒出遮罩，不用手涂；
+   要连下装一起换就选「整套衣物」，只换上装就选「上衣」；不准再用框选/画笔修；
 3. 提示词要写**完整画面**，不是只写新衣服：
    `full body photograph of a young man in a bright studio, wearing a black leather jacket and blue jeans, plain grey background, natural light`
    —— 只写 "black leather jacket" 会丢掉场景上下文，容易把背景也改坏；
@@ -428,7 +458,9 @@ curl -sS -H 'Content-Type: text/plain' --data-binary @examples/cicd.mmd \
 | `SD_WIDTH` / `SD_HEIGHT` | 1024 / 1024 | 服务端默认尺寸 |
 | `SD_CKPT_VAE` | 空 | 可选，覆盖 VAE（文件名在 `models/checkpoints/` 下） |
 | `SDCPP_EXTRA_ARGS` | 空 | 追加参数，如 `--vae-tiling` |
-| `SDCPP_PORT` / `WEB_PORT` / `DIAGRAM_PORT` | 18234 / 18080 / 18000 | 端口 |
+| `SDCPP_PORT` / `WEB_PORT` / `DIAGRAM_PORT` / `MANAGER_PORT` | 18234 / 18080 / 18000 / 18235 | 端口 |
+| `SEGMENTER_IMAGE` | `image-gen-segmenter:local` | 自动选区的分割镜像（本地构建） |
+| `HF_ENDPOINT` | `https://hf-mirror.com` | 分割模型下载源 |
 | `SDCPP_HOST` | `0.0.0.0` | 监听地址 |
 | `PROJECT_DIR` | 仓库绝对路径（自动写入） | manager 容器按同路径挂载仓库；由 `prepare.sh` / `make` 维护，换目录重跑 `make prepare` |
 | `MANAGER_PORT` | 18235 | 控制面端口，只绑 `127.0.0.1` |

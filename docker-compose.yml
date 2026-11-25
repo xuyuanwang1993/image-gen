@@ -112,7 +112,30 @@ services:
         max-file: "3"
 
   # ---------------------------------------------------------------------------
-  # 4) 网页界面：生图页 + 流程图页，并把三个后端反代到同源
+  # 3.5) 分割服务：图生图的「自动选区」（衣物/人物/皮肤/头发/背景）
+  #      SegFormer-B2 clothes，CPU 推理，不占显存；只走内网，由 nginx 反代 /segment/
+  # ---------------------------------------------------------------------------
+  segmenter:
+    build:
+      context: ./docker/segmenter
+    image: ${SEGMENTER_IMAGE:-image-gen-segmenter:local}
+    container_name: sd-segmenter
+    restart: unless-stopped
+    volumes:
+      # 模型缓存（约 29MB），挂出来避免每次重建都重下
+      - ./models/segformer:/models/segformer
+    environment:
+      - MODEL_CACHE=/models/segformer
+      - HF_ENDPOINT=${HF_ENDPOINT:-https://hf-mirror.com}
+      - TZ=${TZ:-Asia/Shanghai}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # 4) 网页界面：生图页 + 流程图页，并把四个后端反代到同源
   # ---------------------------------------------------------------------------
   web:
     image: ${NGINX_IMAGE:-nginx:1.27-alpine}
