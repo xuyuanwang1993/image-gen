@@ -175,6 +175,7 @@
         <label style="margin-top:12px">遮罩 <span class="sub">（推荐直接「自动选区」；也可框选/画笔精修）</span></label>
         <div class="row" style="margin-bottom:8px">
           <select id="segClass">
+            <option value="auto" selected>自动（衣物）</option>
             <option value="upper">上衣</option>
             <option value="lower">下装（裤/裙）</option>
             <option value="dress">连衣裙</option>
@@ -195,6 +196,7 @@
             <select id="brushMode">
               <option value="rect">矩形框选（最快）</option>
               <option value="ellipse">椭圆框选</option>
+              <option value="wand">魔棒补选（点一下同色区域）</option>
               <option value="paint">画笔</option>
               <option value="erase">橡皮</option>
             </select>
@@ -202,6 +204,12 @@
           <div>
             <label for="brushSize">大小</label>
             <input id="brushSize" type="range" min="10" max="180" step="2" value="60">
+          </div>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <div>
+            <label for="wandTol">魔棒容差 <span class="sub" id="wandTolVal">28</span></label>
+            <input id="wandTol" type="range" min="5" max="80" step="1" value="28">
           </div>
         </div>
         <button type="button" class="mini" id="maskClear" style="margin-top:8px">清除遮罩</button>
@@ -633,7 +641,7 @@ function drawMaskView() {
   if (tintCanvas.width !== w || tintCanvas.height !== h) { tintCanvas.width = w; tintCanvas.height = h; }
   tintCtx.globalCompositeOperation = 'source-over';
   tintCtx.clearRect(0, 0, w, h);
-  tintCtx.fillStyle = '#ff3b3b';
+  tintCtx.fillStyle = '#22d3ee';   // 青色：红衣服 / 白衬衫 / 肤色上都看得清
   tintCtx.fillRect(0, 0, w, h);
   tintCtx.globalCompositeOperation = 'destination-in';
   tintCtx.drawImage(maskCanvas, 0, 0);
@@ -690,10 +698,80 @@ function commitShape() {
   MASK_DIRTY = true;
 }
 
+/* 魔棒：从落点 flood fill 同色区域，并进现有遮罩 */
+let wandSrc = null;
+
+function ensureWandSource() {
+  if (wandSrc || !maskBaseImg) return;
+  const c = document.createElement('canvas');
+  c.width = maskBaseImg.naturalWidth || maskBaseImg.width;
+  c.height = maskBaseImg.naturalHeight || maskBaseImg.height;
+  const g = c.getContext('2d');
+  g.drawImage(maskBaseImg, 0, 0);
+  wandSrc = g.getImageData(0, 0, c.width, c.height);
+}
+
+function wandSelect(p) {
+  ensureWandSource();
+  if (!wandSrc) return;
+  const W = wandSrc.width, H = wandSrc.height;
+  const x0 = Math.min(W - 1, Math.max(0, Math.round(p.x)));
+  const y0 = Math.min(H - 1, Math.max(0, Math.round(p.y)));
+  const src = wandSrc.data;
+  const tol = Number($('wandTol').value) || 28;
+  const seed = (y0 * W + x0) * 4;
+  const r0 = src[seed], g0 = src[seed + 1], b0 = src[seed + 2];
+
+  const visited = new Uint8Array(W * H);
+  const filled = new Uint8Array(W * H);
+  const stack = [y0 * W + x0];
+  let count = 0;
+  while (stack.length) {
+    const i = stack.pop();
+    if (visited[i]) continue;
+    visited[i] = 1;
+    const o = i * 4;
+    const dr = Math.abs(src[o] - r0), dg = Math.abs(src[o + 1] - g0), db = Math.abs(src[o + 2] - b0);
+    if (Math.max(dr, dg, db) > tol) continue;      // 逐通道最大差，对亮度不敏感
+    filled[i] = 255;
+    count++;
+    const x = i % W, y = (i / W) | 0;
+    if (x > 0) stack.push(i - 1);
+    if (x < W - 1) stack.push(i + 1);
+    if (y > 0) stack.push(i - W);
+    if (y < H - 1) stack.push(i + W);
+  }
+  if (!count) return 0;
+
+  const layer = document.createElement('canvas');
+  layer.width = W; layer.height = H;
+  const lctx = layer.getContext('2d');
+  const img = lctx.createImageData(W, H);
+  for (let i = 0; i < W * H; i++) {
+    if (!filled[i]) continue;
+    const o = i * 4;
+    img.data[o] = 255; img.data[o + 1] = 255; img.data[o + 2] = 255; img.data[o + 3] = 255;
+  }
+  lctx.putImageData(img, 0, 0);
+
+  maskCtx.globalCompositeOperation = 'source-over';
+  maskCtx.drawImage(layer, 0, 0, maskCanvas.width, maskCanvas.height);
+  MASK_DIRTY = true;
+  drawMaskView();
+  return count;
+}
+
 function bindMaskDrawing() {
   dispCanvas.onpointerdown = ev => {
     const tool = $('brushMode').value;
     dispCanvas.setPointerCapture(ev.pointerId);
+    if (tool === 'wand') {
+      const p = maskPoint(ev);
+      const n = wandSelect(p);
+      status.className = n ? 'status ok' : 'status err';
+      status.textContent = n ? `魔棒补选：并入约 ${n} 像素` : '魔棒没选中任何像素，调大容差或换落点';
+      return;
+    }
     if (tool === 'rect' || tool === 'ellipse') {       // 框选：按下开始，松开生效
       shapeTool = tool;
       shapeStart = maskPoint(ev);
@@ -734,12 +812,31 @@ $('maskClear').onclick = () => {
 };
 
 /* ===== 自动选区：调分割服务（/segment），按语义区域直接生成遮罩 ===== */
-const SEG_LABELS = {upper: '上衣', lower: '下装', dress: '连衣裙', garment: '整套衣物',
+const SEG_LABELS = {auto: '自动（衣物）', upper: '上衣', lower: '下装', dress: '连衣裙', garment: '整套衣物',
   shoes: '鞋', person: '人物', skin: '皮肤', hair: '头发', accessory: '配饰', background: '背景'};
 let SEG_CACHE = {key: null, data: null, pending: null};
 
 function segCacheKey() {
   return INIT ? `${INIT.width}x${INIT.height}:${INIT.b64.length}:${INIT.name}` : '';
+}
+
+/** 选中的类可能在这张图里是空的（比如袍子被认成连衣裙，选「上衣」就是 0%）：
+ *  自动模式取占比最大的衣物类；显式选择为空时兜底到最大的衣物类并说明原因。 */
+function pickSegClass(data, wanted) {
+  const order = ['garment', 'dress', 'upper', 'lower', 'shoes', 'accessory'];
+  const ratio = (k) => data.ratios[k] || 0;
+  const best = order.reduce((a, b) => (ratio(b) > ratio(a) ? b : a), order[0]);
+
+  if (wanted === 'auto') {
+    return ratio(best) >= 0.3
+      ? {key: best, note: ''}
+      : {key: 'person', note: '没识别到衣物，已改用人物'};
+  }
+  if (ratio(wanted) >= 0.3) return {key: wanted, note: ''};
+  if (ratio(best) >= 0.3) {
+    return {key: best, note: `${SEG_LABELS[wanted]}只有 ${ratio(wanted)}%，已改用${SEG_LABELS[best]}`};
+  }
+  return {key: '', note: `没识别到${SEG_LABELS[wanted] || wanted}，试试「人物」或手动框选`};
 }
 
 async function requestSegments() {
@@ -773,13 +870,29 @@ $('segBtn').onclick = async () => {
     status.textContent = '先上传参考图';
     return;
   }
-  const cls = $('segClass').value;
+  const wanted = $('segClass').value;
   const btn = $('segBtn');
   btn.disabled = true;
   status.className = 'status';
   status.textContent = '正在识别…（首次需要加载模型，约 10~20 秒）';
   try {
     const data = await requestSegments();
+
+    // 把占比写回下拉，让用户一眼看到哪一类在这张图里是空的
+    [...$('segClass').options].forEach(o => {
+      if (o.value === 'auto') return;
+      const r = data.ratios[o.value];
+      if (typeof r === 'number') o.textContent = `${SEG_LABELS[o.value]} ${r}%`;
+    });
+
+    const pick = pickSegClass(data, wanted);
+    if (!pick.key) {
+      status.className = 'status err';
+      status.textContent = pick.note;
+      return;
+    }
+    const cls = pick.key;
+
     const maskImg = await new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => resolve(img);
@@ -793,7 +906,9 @@ $('segBtn').onclick = async () => {
     shapeStart = shapeCur = null;
     drawMaskView();
     status.className = 'status ok';
-    status.textContent = `已选中${SEG_LABELS[cls] || cls}（占画面 ${data.ratios[cls]}%，识别 ${data.ms}ms）`;
+    status.textContent = `已选中${SEG_LABELS[cls] || cls}（${data.ratios[cls]}%）`
+      + (pick.note ? `；${pick.note}` : '')
+      + `，识别 ${data.ms}ms`;
   } catch (e) {
     status.className = 'status err';
     status.textContent = '自动选区失败：' + e.message;
@@ -812,6 +927,7 @@ drop.ondrop = e => {
   if (e.dataTransfer.files[0]) loadInitImage(e.dataTransfer.files[0]);
 };
 $('denoise').oninput = () => { $('denoiseVal').textContent = Number($('denoise').value).toFixed(2); };
+$('wandTol').oninput = () => { $('wandTolVal').textContent = $('wandTol').value; };
 
 /** 移除参考图：清掉图、遮罩和缩放状态，回到「未上传」 */
 function clearInitImage() {

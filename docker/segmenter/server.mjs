@@ -87,6 +87,38 @@ function encodeMask(mask, width, height) {
   return PNG.sync.write(png).toString('base64');
 }
 
+// 形态学：先膨胀再腐蚀（闭运算）补小洞，再外扩 1px 让重绘盖住边缘
+function morph(mask, W, H, radius, grow) {
+  const out = new Uint8Array(W * H);
+  const r = radius;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      // 膨胀：初始 0，邻域有 1 则置 1；腐蚀：初始 1，邻域有 0 则置 0
+      let hit = grow ? 0 : 1;
+      for (let dy = -r; dy <= r && !(grow && hit); dy++) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= H) continue;
+        for (let dx = -r; dx <= r; dx++) {
+          const xx = x + dx;
+          if (xx < 0 || xx >= W) continue;
+          const v = mask[yy * W + xx];
+          if (grow) { if (v) { hit = 1; break; } }
+          else if (!v) { hit = 0; break; }
+        }
+      }
+      out[y * W + x] = hit;
+    }
+  }
+  return out;
+}
+
+function refine(mask, W, H) {
+  let m = morph(mask, W, H, 1, true);      // dilate
+  m = morph(m, W, H, 1, false);            // erode  -> 闭运算，补小洞
+  m = morph(m, W, H, 1, true);             // 再外扩 1px
+  return m;
+}
+
 async function segment(imageB64) {
   const seg = await getSegmenter();
   const img = decodePng(Buffer.from(imageB64, 'base64'));
@@ -118,7 +150,8 @@ async function segment(imageB64) {
     const mask = new Uint8Array(total);
     let n = 0;
     for (let p = 0; p < total; p++) if (set.has(labelMap[p])) { mask[p] = 1; n++; }
-    masks[name] = encodeMask(mask, W, H);
+    const cleaned = refine(mask, W, H);
+    masks[name] = encodeMask(cleaned, W, H);
     ratios[name] = +((n / total) * 100).toFixed(1);
   }
 
@@ -128,7 +161,7 @@ async function segment(imageB64) {
   const personMask = new Uint8Array(total);
   let pn = 0;
   for (let p = 0; p < total; p++) if (personSet.has(labelMap[p])) { personMask[p] = 1; pn++; }
-  masks.person = encodeMask(personMask, W, H);
+  masks.person = encodeMask(refine(personMask, W, H), W, H);
   ratios.person = +((pn / total) * 100).toFixed(1);
 
   return { width: W, height: H, ms, ratios, masks };
