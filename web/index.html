@@ -202,6 +202,13 @@
             <input id="wandTol" type="range" min="5" max="80" step="1" value="28">
           </div>
         </div>
+        <div class="row" style="margin-top:8px">
+          <div>
+            <label for="feather">边缘羽化 <span class="sub" id="featherVal">0</span></label>
+            <input id="feather" type="range" min="0" max="32" step="2" value="0">
+          </div>
+        </div>
+        <p class="hint" style="margin-top:4px">模型会把遮罩二值化，所以羽化是在生成后按模糊遮罩把结果和原图混合，用来消接缝。</p>
         <button type="button" class="mini" id="maskUndo" style="margin-top:8px">撤销</button>
         <button type="button" class="mini" id="maskClear" style="margin-top:8px">清除遮罩</button>
         <p class="hint" style="margin-top:6px">自动选区识别的是整块语义区域（比如整件衣服）；想只改一部分，再用框选/橡皮修。第一次点会下载约 29MB 的分割模型。</p>
@@ -841,6 +848,46 @@ function bindMaskDrawing() {
   };
 }
 
+/** 生成后按羽化遮罩把「结果」和「原图」混合，消掉硬边接缝（后端会把 mask 二值化，所以只能在前端做） */
+async function featherComposite(resultB64) {
+  const feather = Number($('feather').value) || 0;
+  if (!feather || !maskCanvas || !INIT) return resultB64;
+
+  const W = INIT.width, H = INIT.height;
+  const load = (src) => new Promise((res, rej) => {
+    const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src;
+  });
+
+  const [resultImg, baseImg] = await Promise.all([
+    load('data:image/png;base64,' + resultB64),
+    load('data:image/png;base64,' + INIT.b64),
+  ]);
+
+  // 模糊后的遮罩（alpha）
+  const soft = document.createElement('canvas');
+  soft.width = W; soft.height = H;
+  const sctx = soft.getContext('2d');
+  sctx.filter = `blur(${feather}px)`;
+  sctx.drawImage(maskCanvas, 0, 0, W, H);
+  sctx.filter = 'none';
+
+  // 结果图层，用模糊遮罩做 alpha
+  const layer = document.createElement('canvas');
+  layer.width = W; layer.height = H;
+  const lctx = layer.getContext('2d');
+  lctx.drawImage(resultImg, 0, 0, W, H);
+  lctx.globalCompositeOperation = 'destination-in';
+  lctx.drawImage(soft, 0, 0);
+  lctx.globalCompositeOperation = 'source-over';
+
+  const out = document.createElement('canvas');
+  out.width = W; out.height = H;
+  const octx = out.getContext('2d');
+  octx.drawImage(baseImg, 0, 0, W, H);
+  octx.drawImage(layer, 0, 0);
+  return out.toDataURL('image/png').split(',')[1];
+}
+
 $('maskClear').onclick = () => {
   if (!maskCtx) return;
   pushMaskHistory();
@@ -1004,6 +1051,7 @@ document.addEventListener('keydown', e => {
 });
 $('denoise').oninput = () => { $('denoiseVal').textContent = Number($('denoise').value).toFixed(2); };
 $('wandTol').oninput = () => { $('wandTolVal').textContent = $('wandTol').value; };
+$('feather').oninput = () => { $('featherVal').textContent = $('feather').value; };
 
 /** 移除参考图：清掉图、遮罩和缩放状态，回到「未上传」 */
 function clearInitImage() {
@@ -1083,7 +1131,10 @@ go.onclick = async () => {
     try { info = JSON.parse(data.info || '{}'); } catch (e) {}
     const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
     const prefix = img2img ? 'i2i' : (MODEL.style === 'anime' ? 'anime' : 'sdxl');
-    data.images.forEach((b64, i) => {
+    for (let i = 0; i < data.images.length; i++) {
+      let b64 = data.images[i];
+      // 羽化：生成后按模糊遮罩把结果和原图混合（后端会把 mask 二值化）
+      if (img2img && body.mask) b64 = await featherComposite(b64);
       const seed = (info.all_seeds && info.all_seeds[i] !== undefined) ? info.all_seeds[i] : $('seed').value;
       const blob = b64ToBlob(b64);
       const id = `${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1097,7 +1148,7 @@ go.onclick = async () => {
       };
       cache.add(entry);
       dbPut({id, name: entry.name, label: entry.label, meta: entry.meta, blob, t: Date.now()});
-    });
+    }
     renderGallery();
     const secs = ((Date.now() - t0) / 1000).toFixed(1);
     status.className = 'status ok';
