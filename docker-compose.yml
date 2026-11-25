@@ -1,0 +1,130 @@
+name: image-gen
+
+# 「SDXL 生图 + 流程图」服务
+#   docker compose up -d
+#   网页界面（生图 / 流程图）: http://<HOST>:<WEB_PORT>   (默认 18080)
+#   生图 HTTP API            : http://<HOST>:<SDCPP_PORT> (默认 18234)
+#   流程图 HTTP API          : http://<HOST>:<DIAGRAM_PORT> (默认 18000)
+#
+# 生图跑单文件 checkpoint（SDXL 系列 .safetensors）。当前用哪套权重由 .env 决定：
+#   ./scripts/use-model.sh real     # 写实
+#   ./scripts/use-model.sh anime    # 二次元
+# 16 GB 显存同一时间只放得下一套，所以是「重启容器换模型」，不能同时加载。
+services:
+  # ---------------------------------------------------------------------------
+  # 1) AI 生图：SDXL checkpoint（stable-diffusion.cpp + CUDA）
+  # ---------------------------------------------------------------------------
+  sd-server:
+    image: ${SDCPP_IMAGE:-ghcr.io/leejet/stable-diffusion.cpp:master-cuda}
+    container_name: sd-server
+    restart: unless-stopped
+    # 镜像默认入口是 /sd-cli；这里换成脚本，按 .env 拼 --model/--steps/--cfg-scale 等参数
+    entrypoint: ["/opt/sd-launch"]
+    volumes:
+      - ./models:/models:ro
+      - ./scripts/sd-launch.sh:/opt/sd-launch:ro
+    # 模型参数直接由 .env 灌进容器（env_file 不会被当前 shell 里的同名变量覆盖，
+    # 而 `${VAR}` 插值会——换模型时这点很关键）
+    env_file:
+      - .env
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    ports:
+      # 0.0.0.0 才能被 Windows / 局域网访问；只想本机用就改成 127.0.0.1
+      - "${SDCPP_HOST:-0.0.0.0}:${SDCPP_PORT:-18234}:1234"
+    shm_size: 2gb
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      # 镜像里没有 curl，用 bash 的 /dev/tcp 做端口探活
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/1234'"]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+      # 7 GB 权重读进显存，冷启动约 20~40 秒，给足余量
+      start_period: 300s
+
+  # ---------------------------------------------------------------------------
+  # 2) 流程图 / 架构图：自建渲染服务（Mermaid CLI + Graphviz + 中文字体）
+  #    API 与 Kroki 兼容：POST /{type}/{format}，body 就是图源码
+  #    镜像本地构建：Debian 源 + npm 源都换成了国内镜像（见 docker/diagram/Dockerfile）
+  # ---------------------------------------------------------------------------
+  diagram:
+    build:
+      context: ./docker/diagram
+    image: ${DIAGRAM_IMAGE:-image-gen-diagram:local}
+    container_name: diagram
+    restart: unless-stopped
+    ports:
+      - "${SDCPP_HOST:-0.0.0.0}:${DIAGRAM_PORT:-18000}:8000"
+    # Chromium 需要够用的共享内存，否则大图会崩
+    shm_size: 1gb
+    environment:
+      - MAX_CONCURRENCY=${DIAGRAM_CONCURRENCY:-2}
+      - TZ=${TZ:-Asia/Shanghai}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # 3) 模型切换控制面：网页上的「写实 / 二次元」按钮调它
+  #    它挂 docker.sock，执行 scripts/use-model.sh，所以和命令行走同一条路径。
+  #    只发布到宿主机 127.0.0.1，绝不对外。
+  # ---------------------------------------------------------------------------
+  manager:
+    build:
+      context: ./docker/manager
+    image: ${MANAGER_IMAGE:-image-gen-manager:local}
+    container_name: sd-manager
+    restart: unless-stopped
+    volumes:
+      # 必须挂到和宿主机完全相同的路径：容器里再调 docker compose，
+      # 里面的相对路径（./models 等）要能被宿主机 daemon 正确解析。
+      # PROJECT_DIR 由 scripts/prepare.sh 或 make 自动写入/导出，不用手填。
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${PROJECT_DIR:?缺少 PROJECT_DIR：先运行 ./scripts/prepare.sh 或 make prepare}:${PROJECT_DIR}
+    working_dir: ${PROJECT_DIR}
+    env_file:
+      - .env                      # 端口等运行参数（manager 用它拼前端 config）
+    environment:
+      - PROJECT_DIR=${PROJECT_DIR}
+      - MANAGER_PORT=${MANAGER_PORT:-18235}
+      - TZ=${TZ:-Asia/Shanghai}
+    ports:
+      - "127.0.0.1:${MANAGER_PORT:-18235}:18235"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # 4) 网页界面：生图页 + 流程图页，并把三个后端反代到同源
+  # ---------------------------------------------------------------------------
+  web:
+    image: ${NGINX_IMAGE:-nginx:1.27-alpine}
+    container_name: sd-web
+    restart: unless-stopped
+    depends_on:
+      - sd-server
+      - diagram
+    ports:
+      - "${SDCPP_HOST:-0.0.0.0}:${WEB_PORT:-18080}:80"
+    volumes:
+      - ./web:/usr/share/nginx/html:ro
+      - ./web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}

@@ -1,0 +1,15 @@
+digraph deps {
+    rankdir=LR;
+    node [shape=box, style="rounded,filled", fillcolor="#eef3ff", color="#4f8cff"];
+    edge [color="#8b93a1"];
+
+    api     [label="api 服务"];
+    worker  [label="worker 服务"];
+    common  [label="common 库"];
+    storage [label="storage 库"];
+
+    api    -> common;
+    worker -> common;
+    common -> storage;
+    worker -> storage [label="直连(待重构)", style=dashed, color="#ff6b6b"];
+}

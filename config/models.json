@@ -1,0 +1,48 @@
+{
+  "schema": "image-gen/models-catalog@1",
+  "defaults": {
+    "width": 1024,
+    "height": 1024,
+    "steps": 28,
+    "cfg": 6.0,
+    "sampler": "euler_a",
+    "clip_skip": null,
+    "negative": "lowres, blurry, jpeg artifacts, watermark, text, signature, deformed hands, extra fingers"
+  },
+  "models": [
+    {
+      "id": "real",
+      "style": "real",
+      "label": "写实",
+      "name": "Juggernaut XL v9",
+      "file": "Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors",
+      "steps": 28,
+      "cfg": 6.0,
+      "sampler": "euler_a",
+      "clip_skip": null,
+      "negative": "cartoon, anime, cgi, 3d render, illustration, painting, sketch, lowres, blurry, jpeg artifacts, watermark, text, signature, deformed hands, extra fingers, mutated limbs",
+      "download": {
+        "repo": "RunDiffusion/Juggernaut-XL-v9",
+        "path": "Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors",
+        "size": 7105348188
+      }
+    },
+    {
+      "id": "anime",
+      "style": "anime",
+      "label": "二次元",
+      "name": "Illustrious XL v1.1",
+      "file": "Illustrious-XL-v1.1.safetensors",
+      "steps": 28,
+      "cfg": 6.0,
+      "sampler": "euler_a",
+      "clip_skip": 2,
+      "negative": "photorealistic, photo, 3d render, lowres, blurry, bad anatomy, bad hands, missing fingers, extra digits, watermark, text, signature",
+      "download": {
+        "repo": "OnomaAIResearch/Illustrious-XL-v1.1",
+        "path": "Illustrious-XL-v1.1.safetensors",
+        "size": 6938040728
+      }
+    }
+  ]
+}

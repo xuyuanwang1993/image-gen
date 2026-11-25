@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>流程图 / 架构图服务 · Mermaid / Graphviz</title>
+<link rel="stylesheet" href="/lightbox.css">
+<style>
+  :root{
+    --bg:#0f1116; --panel:#171a21; --panel2:#1e222b; --line:#2b303b;
+    --txt:#e8ebf1; --dim:#98a0ae; --accent:#4f8cff; --ok:#3ecf8e; --err:#ff6b6b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+       font:14px/1.6 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+  header{padding:14px 24px;border-bottom:1px solid var(--line);display:flex;
+         align-items:center;gap:16px;flex-wrap:wrap}
+  header h1{font-size:16px;margin:0;font-weight:600;margin-right:auto}
+  nav a{color:var(--dim);text-decoration:none;font-size:13px;padding:5px 12px;
+        border:1px solid var(--line);border-radius:999px}
+  nav a:hover{color:var(--txt);border-color:var(--accent)}
+  nav a.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  .wrap{display:grid;grid-template-columns:420px 1fr;gap:18px;padding:18px 24px 40px;align-items:start}
+  @media(max-width:1000px){.wrap{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  label{display:block;font-size:12px;color:var(--dim);margin:12px 0 6px}
+  label:first-child{margin-top:0}
+  textarea,select,input{width:100%;background:var(--panel2);border:1px solid var(--line);
+       color:var(--txt);border-radius:8px;padding:9px 10px;font:inherit;outline:none}
+  textarea{min-height:300px;resize:vertical;font:12.5px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  textarea:focus,select:focus,input:focus{border-color:var(--accent)}
+  .row{display:flex;gap:10px}
+  .row>*{flex:1;min-width:0}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .chip{font-size:12px;padding:4px 9px;border-radius:999px;background:var(--panel2);
+        border:1px solid var(--line);color:var(--dim);cursor:pointer}
+  .chip:hover{border-color:var(--accent);color:var(--txt)}
+  button{width:100%;margin-top:14px;padding:11px;border:0;border-radius:9px;cursor:pointer;
+         background:var(--accent);color:#fff;font:600 14px/1 inherit}
+  button:disabled{opacity:.55;cursor:not-allowed}
+  button.ghost{background:var(--panel2);border:1px solid var(--line);color:var(--txt);font-weight:500}
+  .status{font-size:12px;color:var(--dim);margin-top:8px;min-height:18px}
+  .status.err{color:var(--err)}
+  .status.ok{color:var(--ok)}
+  #canvas{background:#fff;border-radius:12px;border:1px solid var(--line);padding:16px;
+          min-height:320px;display:flex;align-items:center;justify-content:center;overflow:auto}
+  #canvas img{max-width:100%;height:auto}
+  .placeholder{color:#8b93a1;font-size:13px}
+  .hint{font-size:12px;color:var(--dim);margin-top:10px}
+  pre{background:#0b0d12;border:1px solid var(--line);border-radius:8px;padding:10px;
+      overflow:auto;font-size:12px;color:#c9d1d9}
+  details{margin-top:14px;font-size:12px;color:var(--dim)}
+</style>
+</head>
+<body>
+<header>
+  <h1>流程图 / 架构图</h1>
+  <nav>
+    <a href="/">AI 生图</a>
+    <a href="/flowchart.html" class="on">流程图</a>
+    <a data-api-port="18234" href="#" target="_blank" rel="noreferrer">上游 WebUI</a>
+  </nav>
+</header>
+
+<div class="wrap">
+  <section class="card">
+    <label for="type">图类型</label>
+    <select id="type">
+      <option value="mermaid" selected>Mermaid · 流程图 / 时序图 / 状态图</option>
+      <option value="graphviz">Graphviz · DOT 依赖图</option>
+    </select>
+
+    <label for="src">图源码（改完点“渲染”，文字和连线完全由你控制）</label>
+    <textarea id="src" spellcheck="false"></textarea>
+
+    <div class="chips">
+      <span class="chip">CI/CD 流水线</span>
+      <span class="chip">微服务调用时序</span>
+      <span class="chip">服务架构图</span>
+      <span class="chip">任务状态机</span>
+      <span class="chip">Graphviz 依赖关系</span>
+    </div>
+
+    <div class="row">
+      <div>
+        <label for="fmt">输出格式</label>
+        <select id="fmt">
+          <option value="svg" selected>SVG（推荐，PPT 里可缩放）</option>
+          <option value="png">PNG</option>
+          <option value="pdf">PDF</option>
+        </select>
+      </div>
+      <div>
+        <label>操作</label>
+        <button id="dl" class="ghost" style="margin-top:0" disabled>下载</button>
+      </div>
+    </div>
+
+    <button id="go">渲染</button>
+    <div class="status" id="status">就绪</div>
+
+    <details>
+      <summary>命令行 / API 调用</summary>
+      <pre id="apicmd">curl -sS -H 'Content-Type: text/plain' \
+  --data-binary @flow.mmd \
+  http://127.0.0.1:18000/mermaid/svg -o flow.svg</pre>
+      <div class="hint">也提供了脚本：<code>./scripts/flowchart.sh flow.mmd flow.svg</code>（.mmd → Mermaid，.dot → Graphviz）</div>
+    </details>
+    <p class="hint">需要插画 / 背景 / 图标时去 <a href="/" style="color:var(--accent)">AI 生图</a> 页；
+      需要文字准确、能反复改的流程图就用这里。两者可以配合：AI 出底图，这里叠流程图。</p>
+  </section>
+
+  <section>
+    <div id="canvas"><span class="placeholder">渲染结果会显示在这里（缩略图预览，双击看原图）</span></div>
+    <p class="hint-dbl">最近 <b>12</b> 次渲染结果（单击切换预览，<b>双击看原图</b>）</p>
+    <div id="strip" class="strip"><span class="empty">还没有渲染结果</span></div>
+  </section>
+</div>
+
+<script src="/lightbox.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const SRC = $('src'), TYPE = $('type'), FMT = $('fmt'), status = $('status'),
+      canvas = $('canvas'), go = $('go'), dl = $('dl'), strip = $('strip');
+const cache = new ResultCache();      // 最多缓存 MAX_RESULTS(12) 次任务结果
+let current = null;                   // 当前预览的那一条
+
+const TPL = {
+  'CI/CD 流水线': `flowchart LR
+    A[提交代码] --> B[构建]
+    B --> C{单元测试}
+    C -- 通过 --> D[镜像打包]
+    C -- 失败 --> E[通知开发者]
+    D --> F[部署预发环境]
+    F --> G[集成验收]
+    G --> H[生产上线]
+    E -.修复后重试.-> A`,
+
+  '微服务调用时序': `sequenceDiagram
+    autonumber
+    participant U as 用户
+    participant G as API 网关
+    participant O as 订单服务
+    participant P as 支付服务
+    participant M as 消息队列
+    U->>G: 提交订单
+    G->>O: 创建订单
+    O->>P: 发起支付
+    P-->>O: 支付成功
+    O->>M: 发布 OrderPaid 事件
+    O-->>U: 返回下单成功`,
+
+  '服务架构图': `flowchart TB
+    subgraph client[客户端]
+      W[Web 前端]
+      A[移动端]
+    end
+    subgraph edge[接入层]
+      GW[API 网关]
+      LB[负载均衡]
+    end
+    subgraph svc[业务服务]
+      OS[订单服务]
+      US[用户服务]
+      PS[支付服务]
+    end
+    subgraph data[数据层]
+      DB[(PostgreSQL)]
+      RD[(Redis)]
+      MQ[[Kafka]]
+    end
+    W --> LB
+    A --> LB
+    LB --> GW
+    GW --> OS & US & PS
+    OS --> DB
+    OS --> MQ
+    US --> RD
+    PS --> DB`,
+
+  '任务状态机': `stateDiagram-v2
+    [*] --> 待处理
+    待处理 --> 运行中: 调度
+    运行中 --> 成功: 退出码 0
+    运行中 --> 失败: 异常/超时
+    失败 --> 待处理: 重试(<3 次)
+    失败 --> 人工介入: 重试耗尽
+    人工介入 --> 成功: 修复并重跑
+    成功 --> [*]`,
+
+  'Graphviz 依赖关系': `digraph deps {
+    rankdir=LR;
+    node [shape=box, style="rounded,filled", fillcolor="#eef3ff", color="#4f8cff", fontname="Helvetica"];
+    edge [color="#8b93a1", fontname="Helvetica", fontsize=10];
+    api      [label="api 服务"];
+    worker   [label="worker 服务"];
+    common   [label="common 库"];
+    storage  [label="storage 库"];
+    api    -> common;
+    worker -> common;
+    common -> storage;
+    worker -> storage [label="直连(待重构)", style=dashed, color="#ff6b6b"];
+  }`
+};
+
+function loadTemplate(name) {
+  const t = TPL[name];
+  if (!t) return;
+  if (TYPE.value === 'graphviz') SRC.value = TPL['Graphviz 依赖关系'];
+  else SRC.value = t;
+}
+
+document.querySelectorAll('.chip').forEach(c => c.onclick = () => loadTemplate(c.textContent.trim()));
+TYPE.onchange = () => loadTemplate(Object.keys(TPL)[0]);
+SRC.value = TPL['CI/CD 流水线'];
+
+async function render() {
+  const src = SRC.value.trim();
+  if (!src) { setStatus('图源码不能为空', 'err'); return; }
+  go.disabled = true;
+  setStatus('渲染中…');
+  const t0 = Date.now();
+  try {
+    const res = await fetch(`/diagram/${TYPE.value}/${FMT.value}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'text/plain'},
+      body: src
+    });
+    if (!res.ok) throw new Error((await res.text()).slice(0, 300) || ('HTTP ' + res.status));
+    const blob = await res.blob();
+    const secs = ((Date.now() - t0) / 1000).toFixed(1);
+    const ext = FMT.value === 'jpeg' ? 'jpg' : FMT.value;
+    const entry = {
+      url: URL.createObjectURL(blob),
+      name: `diagram_${TYPE.value}_${new Date().toISOString().replace(/[-:T]/g,'').slice(0,14)}.${ext}`,
+      label: `${TYPE.value} / ${ext.toUpperCase()}`,
+      meta: `${(blob.size / 1024).toFixed(1)} KB · ${secs}s · ${SRC.value.split('\n')[0].trim().slice(0, 28)}`
+    };
+    cache.add(entry);                // 超出 4 条时自动回收最老的一条（含 blob URL）
+    showResult(entry);
+    renderStrip();
+    setStatus(`完成，用时 ${secs}s（结果最多保留 ${MAX_RESULTS} 条）`, 'ok');
+  } catch (e) {
+    setStatus('渲染失败：' + e.message, 'err');
+    canvas.innerHTML = '<span class="placeholder">渲染失败，检查图源码语法</span>';
+  } finally {
+    go.disabled = false;
+  }
+}
+
+/** 主区域只显示缩略图预览，双击才打开原图 */
+function showResult(entry) {
+  current = entry;
+  canvas.innerHTML = `<img src="${entry.url}" alt="${entry.name}" title="双击查看原图">`;
+  canvas.firstElementChild.ondblclick = () => Lightbox.open(entry);
+  dl.disabled = false;
+}
+
+/** 缩略图条：新结果在前 */
+function renderStrip() {
+  const items = cache.items.slice().reverse();
+  strip.innerHTML = '';
+  if (!items.length) {
+    strip.innerHTML = '<span class="empty">还没有渲染结果</span>';
+    return;
+  }
+  items.forEach(e => {
+    const fig = document.createElement('figure');
+    fig.className = 'item' + (current && current.url === e.url ? ' on' : '');
+    fig.title = '单击切换预览，双击查看原图';
+    fig.innerHTML = `<img src="${e.url}" alt="${e.name}"><figcaption>${e.label} · ${e.meta}</figcaption>`;
+    fig.onclick = () => { showResult(e); renderStrip(); };
+    fig.ondblclick = () => Lightbox.open(e);
+    strip.appendChild(fig);
+  });
+}
+function setStatus(text, cls) { status.className = 'status' + (cls ? ' ' + cls : ''); status.textContent = text; }
+
+// 让「上游 WebUI」等链接跟随当前访问的主机名（localhost / WSL IP / 局域网 IP 都能用）
+document.querySelectorAll('[data-api-port]').forEach(a => {
+  a.href = `${location.protocol}//${location.hostname}:${a.dataset.apiPort}/`;
+});
+go.onclick = render;
+dl.onclick = () => {
+  if (!current) return;
+  const a = document.createElement('a');
+  a.href = current.url; a.download = current.name; a.click();
+};
+// Ctrl/Cmd + Enter 快捷渲染
+SRC.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') render();
+});
+render();
+</script>
+</body>
+</html>

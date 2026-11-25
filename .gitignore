@@ -1,0 +1,17 @@
+# 模型权重与其它大文件（体积大，不入库）
+models/
+outputs/
+.imgfetch/
+# 本地配置
+.env
+.docker-config/
+
+# 运行时生成的当前模型信息（use-model.sh 写入）
+web/model.json
+
+# 用户保存的生图配置预设
+data/
+
+# Python 缓存
+__pycache__/
+*.pyc

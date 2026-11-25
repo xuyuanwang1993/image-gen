@@ -1,0 +1,27 @@
+flowchart TB
+    subgraph client[客户端]
+      W[Web 前端]
+      A[移动端]
+    end
+    subgraph edge[接入层]
+      LB[负载均衡]
+      GW[API 网关]
+    end
+    subgraph svc[业务服务]
+      OS[订单服务]
+      US[用户服务]
+      PS[支付服务]
+    end
+    subgraph data[数据层]
+      DB[(PostgreSQL)]
+      RD[(Redis)]
+      MQ[[Kafka]]
+    end
+    W --> LB
+    A --> LB
+    LB --> GW
+    GW --> OS & US & PS
+    OS --> DB
+    OS --> MQ
+    US --> RD
+    PS --> DB

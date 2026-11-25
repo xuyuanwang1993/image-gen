@@ -1,0 +1,1025 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SDXL 生图服务</title>
+<link rel="stylesheet" href="/lightbox.css?v=2">
+<style>
+  :root{
+    --bg:#0f1116; --panel:#171a21; --panel2:#1e222b; --line:#2b303b;
+    --txt:#e8ebf1; --dim:#98a0ae; --accent:#4f8cff; --ok:#3ecf8e; --err:#ff6b6b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+       font:14px/1.6 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+  header{padding:18px 24px;border-bottom:1px solid var(--line);display:flex;
+         align-items:baseline;gap:12px;flex-wrap:wrap}
+  header h1{font-size:17px;margin:0;font-weight:600}
+  header .tag{font-size:12px;color:var(--dim)}
+  .badge{font-size:11px;padding:2px 8px;border-radius:999px;border:1px solid var(--line);color:var(--dim)}
+  .badge.real{color:#7cc4ff;border-color:#2b4a6b;background:#132233}
+  .badge.anime{color:#ff9ecb;border-color:#5e2b45;background:#2a1521}
+  /* 模型切换：分段按钮 */
+  .switch{display:inline-flex;align-items:center;border:1px solid var(--line);
+          border-radius:999px;overflow:hidden;background:var(--panel2)}
+  .switch[hidden]{display:none}
+  .switch button{width:auto;margin:0;padding:5px 13px;border:0;border-radius:0;background:none;
+          color:var(--dim);font:500 12.5px/1.5 inherit;cursor:pointer}
+  .switch button+button{border-left:1px solid var(--line)}
+  .switch button:hover{color:var(--txt)}
+  .switch button.on{background:var(--accent);color:#fff}
+  .switch button:disabled{cursor:progress;opacity:.7}
+  .switch-status{font-size:12px;color:var(--dim);margin-left:8px}
+  /* 文生图 / 图生图 切换 */
+  .tabs{display:flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;
+        margin-bottom:14px;background:var(--panel2)}
+  .tabs button{flex:1;width:auto;margin:0;padding:8px;border:0;border-radius:0;background:none;
+        color:var(--dim);font:600 13px/1.2 inherit;cursor:pointer}
+  .tabs button+button{border-left:1px solid var(--line)}
+  .tabs button.on{background:var(--accent);color:#fff}
+  /* 参考图投放区 */
+  .drop{border:1px dashed var(--line);border-radius:10px;padding:14px;text-align:center;
+        color:var(--dim);font-size:12.5px;cursor:pointer;background:var(--panel2)}
+  .drop.over{border-color:var(--accent);color:var(--txt)}
+  .drop img{max-width:100%;max-height:220px;border-radius:8px;display:block;margin:0 auto}
+  .thumb-meta{font-size:11.5px;color:var(--dim);margin-top:6px;word-break:break-all}
+  .mask-wrap{margin-top:8px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#000}
+  .mask-wrap canvas{width:100%;display:block;touch-action:none;cursor:crosshair}
+  input[type=range]{width:100%;padding:0;border:0;background:none;accent-color:var(--accent)}
+  .wrap{display:grid;grid-template-columns:380px 1fr;gap:18px;padding:18px 24px 40px;align-items:start}
+  @media(max-width:900px){.wrap{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  label{display:block;font-size:12px;color:var(--dim);margin:12px 0 6px}
+  label .sub{color:#6b7385;font-weight:400}
+  textarea,input,select{width:100%;background:var(--panel2);border:1px solid var(--line);
+       color:var(--txt);border-radius:8px;padding:9px 10px;font:inherit;outline:none}
+  textarea{min-height:104px;resize:vertical}
+  textarea.neg{min-height:60px;font-size:12.5px;color:#b9c0cc}
+  textarea:focus,input:focus,select:focus{border-color:var(--accent)}
+  .row{display:flex;gap:10px}
+  .row>*{flex:1;min-width:0}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .chip{font-size:12px;padding:4px 9px;border-radius:999px;background:var(--panel2);
+        border:1px solid var(--line);color:var(--dim);cursor:pointer}
+  .chip:hover{border-color:var(--accent);color:var(--txt)}
+  button{width:100%;margin-top:16px;padding:11px;border:0;border-radius:9px;cursor:pointer;
+         background:var(--accent);color:#fff;font:600 14px/1 inherit}
+  button:disabled{opacity:.55;cursor:not-allowed}
+  .hint{font-size:12px;color:var(--dim);margin-top:10px}
+  .bar{height:6px;background:var(--panel2);border-radius:99px;overflow:hidden;margin-top:14px;display:none}
+  .bar>i{display:block;height:100%;width:0;background:var(--accent);transition:width .3s}
+  .status{font-size:12px;color:var(--dim);margin-top:8px;min-height:18px}
+  .status.err{color:var(--err)}
+  .status.ok{color:var(--ok)}
+  .gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
+  figure{margin:0;background:var(--panel);border:1px solid var(--line);border-radius:12px;
+         overflow:hidden;position:relative}
+  figure img{width:100%;display:block;background:#000}
+  /* 每张图右上角的删除按钮，hover 才出现 */
+  figure .del{position:absolute;top:6px;right:6px;width:24px;height:24px;padding:0;margin:0;
+         border-radius:50%;background:rgba(0,0,0,.62);color:#fff;border:1px solid rgba(255,255,255,.28);
+         font:600 14px/22px -apple-system,sans-serif;cursor:pointer;opacity:0;transition:opacity .15s}
+  figure:hover .del{opacity:1}
+  figure .del:hover{background:var(--err);border-color:var(--err)}
+  .gallery-bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;
+         font-size:12px;color:var(--dim)}
+  .gallery-bar a{cursor:pointer;color:var(--dim);text-decoration:none}
+  .gallery-bar a:hover{color:var(--err)}
+  /* 参数预设 */
+  .presets{margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+  .preset-row{display:flex;gap:6px}
+  .preset-row+.preset-row{margin-top:6px}
+  .preset-row select,.preset-row input{flex:1;min-width:0;padding:7px 9px;font-size:12.5px}
+  .mini{width:auto;margin:0;padding:7px 10px;border-radius:7px;font:600 12.5px/1.2 inherit;
+        background:var(--panel2);border:1px solid var(--line);color:var(--txt);cursor:pointer}
+  .mini:hover{border-color:var(--accent)}
+  .mini.danger:hover{border-color:var(--err);color:var(--err)}
+  figcaption{padding:8px 10px;font-size:12px;color:var(--dim);display:flex;justify-content:space-between;gap:8px}
+  figcaption a{color:var(--accent);text-decoration:none}
+  .empty{color:var(--dim);font-size:13px;padding:28px;text-align:center;
+         border:1px dashed var(--line);border-radius:12px}
+  details{margin-top:14px;font-size:12px;color:var(--dim)}
+  details summary{cursor:pointer}
+  pre{background:#0b0d12;border:1px solid var(--line);border-radius:8px;padding:10px;
+      overflow:auto;font-size:12px;color:#c9d1d9;line-height:1.5}
+  .modelbox{margin-top:14px;padding:10px 12px;border:1px solid var(--line);border-radius:9px;
+            background:var(--panel2);font-size:12px;color:var(--dim);line-height:1.7}
+  .modelbox b{color:#c9d1d9}
+  nav{margin-left:auto;display:flex;gap:8px}
+  nav a{border-radius:999px;padding:5px 12px;font-size:13px;text-decoration:none}
+</style>
+</head>
+<body>
+<header>
+  <h1>SDXL 生图服务</h1>
+  <span class="badge" id="styleBadge">…</span>
+  <span class="tag" id="modelTag">加载中…</span>
+  <div class="switch" id="modelSwitch" hidden></div>
+  <span class="switch-status" id="switchStatus"></span>
+  <nav>
+    <a href="/" style="color:#fff;background:#4f8cff;border:1px solid #4f8cff">AI 生图</a>
+    <a href="/flowchart.html" style="color:#98a0ae;border:1px solid #2b303b">流程图</a>
+  </nav>
+</header>
+
+<div class="wrap">
+  <!-- 左：参数面板 -->
+  <section class="card">
+    <div class="tabs" id="modeTabs">
+      <button type="button" data-mode="txt2img" class="on">文生图</button>
+      <button type="button" data-mode="img2img">图生图</button>
+    </div>
+
+    <!-- 参数预设：存在后端（data/presets.json），换浏览器/换机器都还在 -->
+    <div class="presets">
+      <div class="preset-row">
+        <select id="presetSel"><option value="">（还没有保存的配置）</option></select>
+        <button type="button" class="mini" id="presetApply">应用</button>
+        <button type="button" class="mini danger" id="presetDel">删除</button>
+      </div>
+      <div class="preset-row">
+        <input id="presetName" placeholder="配置名，如「写实人像·竖版」">
+        <button type="button" class="mini" id="presetSave">保存当前参数</button>
+      </div>
+    </div>
+
+    <label for="prompt">提示词 <span class="sub">（英文效果最好）</span></label>
+    <textarea id="prompt" placeholder="photorealistic portrait of a woman in her 30s, soft window light, 85mm lens, shallow depth of field"></textarea>
+    <div class="chips" id="chips"></div>
+
+    <label for="negative">负面提示词 <span class="sub">（换风格时自动套对应默认值）</span></label>
+    <textarea id="negative" class="neg" placeholder="lowres, blurry, watermark, text"></textarea>
+
+    <!-- 图生图专用：参考图 + 重绘幅度 -->
+    <div id="i2iBox" hidden>
+      <label>参考图 <span class="sub">（点击选择，或拖进来；会自动缩到最长边 1280。换图直接再拖一张）</span></label>
+      <div class="drop" id="drop">
+        <input type="file" id="file" accept="image/*" hidden>
+        <div id="dropHint">点击选择图片 / 拖拽到这里</div>
+        <div id="thumbWrap" hidden>
+          <img id="thumb" alt="参考图">
+          <div class="thumb-meta" id="thumbMeta"></div>
+        </div>
+      </div>
+      <div id="initActions" hidden style="margin-top:8px">
+        <button type="button" class="mini danger" id="initClear">移除参考图</button>
+        <span class="hint" style="margin-left:8px;display:inline">点图或拖入新图即可替换</span>
+      </div>
+      <label for="denoise" style="margin-top:12px">重绘幅度 <span class="sub" id="denoiseVal">0.60</span></label>
+      <input id="denoise" type="range" min="0.1" max="0.95" step="0.05" value="0.6">
+      <p class="hint" style="margin-top:6px">0.3~0.45 换风格 / 调色；0.5~0.7 换元素、换场景；0.75+ 基本只借构图。</p>
+
+      <!-- 遮罩：只重绘涂到的区域，换衣服 / 换背景用这个 -->
+      <div id="maskBox" hidden>
+        <label style="margin-top:12px">遮罩 <span class="sub">（默认矩形框选：直接拖一个框把要改的地方框住；也可切画笔精修）</span></label>
+        <div class="mask-wrap"><canvas id="maskCanvas"></canvas></div>
+        <div class="row" style="margin-top:8px">
+          <div>
+            <label for="brushMode">工具</label>
+            <select id="brushMode">
+              <option value="rect">矩形框选（最快）</option>
+              <option value="ellipse">椭圆框选</option>
+              <option value="paint">画笔</option>
+              <option value="erase">橡皮</option>
+            </select>
+          </div>
+          <div>
+            <label for="brushSize">大小</label>
+            <input id="brushSize" type="range" min="10" max="180" step="2" value="60">
+          </div>
+        </div>
+        <button type="button" class="mini" id="maskClear" style="margin-top:8px">清除遮罩</button>
+        <p class="hint" style="margin-top:6px">框选可以叠加多个框；换衣服把整件衣服框进去、脸别框。框小一点更稳，边缘切一半会得到「半件新衣」。</p>
+      </div>
+    </div>
+
+    <div id="sizeRow">
+      <label for="size">尺寸</label>
+    <select id="size">
+      <option value="1024x1024" selected>1024×1024 · 方图</option>
+      <option value="832x1216">832×1216 · 竖版 2:3（人像 / 立绘）</option>
+      <option value="1216x832">1216×832 · 横版 3:2（场景）</option>
+      <option value="896x1152">896×1152 · 竖版 3:4</option>
+      <option value="1152x896">1152×896 · 横版 4:3</option>
+      <option value="1344x768">1344×768 · 宽屏 16:9</option>
+      <option value="768x1344">768×1344 · 长竖版 9:16</option>
+    </select>
+    </div>
+
+    <div class="row">
+      <div>
+        <label for="steps">步数</label>
+        <input id="steps" type="number" min="1" max="60" value="28">
+      </div>
+      <div>
+        <label for="cfg">CFG</label>
+        <input id="cfg" type="number" min="1" max="20" step="0.5" value="6">
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label for="sampler">采样器</label>
+        <select id="sampler">
+          <option value="euler_a" selected>euler_a</option>
+          <option value="euler">euler</option>
+          <option value="dpm++2m">dpm++2m</option>
+          <option value="dpm++2s_a">dpm++2s_a</option>
+          <option value="heun">heun</option>
+          <option value="ddim_trailing">ddim_trailing</option>
+        </select>
+      </div>
+      <div>
+        <label for="batch">张数</label>
+        <input id="batch" type="number" min="1" max="4" value="1">
+      </div>
+    </div>
+
+    <label for="seed">随机种子 <span class="sub">（-1 = 每次随机）</span></label>
+    <input id="seed" type="number" value="-1">
+
+    <button id="go">生成图片</button>
+    <div class="bar" id="bar"><i></i></div>
+    <div class="status" id="status">就绪</div>
+
+    <div class="modelbox" id="modelbox">模型信息加载中…</div>
+
+    <details>
+      <summary>本地 API 调用示例（A1111 兼容）</summary>
+      <pre id="curl"></pre>
+    </details>
+    <p class="hint">服务没有内置内容过滤，请在合法范围内自用。提示词写清主体、光线、镜头、质感，
+      比堆 <code>masterpiece</code> 之类的词有效得多。</p>
+  </section>
+
+  <!-- 右：结果（缩略图，双击看原图，最多保留 4 次任务结果） -->
+  <section>
+    <div class="gallery-bar" id="galleryBar" hidden>
+      <span id="galleryCount"></span>
+      <a id="clearAll">清空全部</a>
+    </div>
+    <div id="gallery" class="gallery"></div>
+    <div id="empty" class="empty">生成的图片会显示在这里</div>
+  </section>
+</div>
+
+<script src="/lightbox.js?v=3"></script>
+<script>
+const $ = id => document.getElementById(id);
+const gallery = $('gallery'), empty = $('empty'), status = $('status'),
+      bar = $('bar'), barFill = bar.querySelector('i'), go = $('go');
+const cache = new ResultCache();
+
+/* ===== 结果持久化：IndexedDB =====
+ * 图片以 Blob 存在浏览器本地，刷新 / 关掉浏览器再打开都还在，
+ * 只有「清除站点数据」才会丢。DB 里最多留 DB_KEEP 条，界面只显示最近 MAX_RESULTS 条。
+ */
+const DB_NAME = 'image-gen', DB_STORE = 'results', DB_KEEP = 12;
+let dbPromise = null;
+
+function openDb() {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise((resolve, reject) => {
+    let req;
+    try { req = indexedDB.open(DB_NAME, 1); }
+    catch (e) { reject(e); return; }
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE, {keyPath: 'id'});
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  return dbPromise;
+}
+
+async function dbAll() {
+  try {
+    const db = await openDb();
+    return await new Promise((resolve, reject) => {
+      const req = db.transaction(DB_STORE, 'readonly').objectStore(DB_STORE).getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => reject(req.error);
+    });
+  } catch (e) { return []; }          // 隐私模式 / 被禁用：退化成纯内存
+}
+
+async function dbPut(entry) {
+  try {
+    const db = await openDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(DB_STORE, 'readwrite');
+      tx.objectStore(DB_STORE).put(entry);
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+    const all = await dbAll();
+    if (all.length > DB_KEEP) {
+      all.sort((a, b) => a.t - b.t);
+      for (const row of all.slice(0, all.length - DB_KEEP)) await dbDelete(row.id);
+    }
+  } catch (e) { /* 存不进去就算了，不影响出图 */ }
+}
+
+async function dbDelete(id) {
+  if (!id) return;
+  try {
+    const db = await openDb();
+    await new Promise((resolve) => {
+      const tx = db.transaction(DB_STORE, 'readwrite');
+      tx.objectStore(DB_STORE).delete(id);
+      tx.oncomplete = resolve;
+      tx.onerror = resolve;
+    });
+  } catch (e) { /* ignore */ }
+}
+
+async function dbClear() {
+  try {
+    const db = await openDb();
+    await new Promise((resolve) => {
+      const tx = db.transaction(DB_STORE, 'readwrite');
+      tx.objectStore(DB_STORE).clear();
+      tx.oncomplete = resolve;
+      tx.onerror = resolve;
+    });
+  } catch (e) { /* ignore */ }
+}
+
+/** 打开页面时把上次的结果捞回来（旧 -> 新） */
+async function restoreResults() {
+  const rows = await dbAll();
+  if (!rows.length) return;
+  rows.sort((a, b) => a.t - b.t);
+  rows.slice(-MAX_RESULTS).forEach(row => {
+    if (!row.blob) return;
+    cache.add({
+      url: URL.createObjectURL(row.blob),
+      name: row.name, label: row.label, meta: row.meta, id: row.id,
+    });
+  });
+  renderGallery();
+}
+
+/** base64 -> Blob，用 blob URL（可回收）而不是 data URI */
+function b64ToBlob(b64, mime = 'image/png') {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], {type: mime});
+}
+
+function renderGallery() {
+  const items = cache.items.slice().reverse();
+  gallery.innerHTML = '';
+  empty.style.display = items.length ? 'none' : '';
+  $('galleryBar').hidden = items.length === 0;
+  $('galleryCount').textContent = `最近 ${items.length} 次结果（最多 ${MAX_RESULTS}）`;
+  items.forEach(e => {
+    const fig = document.createElement('figure');
+    fig.className = 'item';
+    fig.title = '单击下载，双击查看原图';
+    fig.innerHTML = `<img src="${e.url}" alt="${e.name}">
+      <button type="button" class="del" title="从列表删除">×</button>
+      <figcaption><span>${e.label}</span><a href="${e.url}" download="${e.name}">下载</a></figcaption>`;
+    fig.ondblclick = () => Lightbox.open(e);
+    fig.querySelector('.del').onclick = ev => {
+      ev.stopPropagation();
+      ev.preventDefault();
+      cache.remove(e);
+      dbDelete(e.id);                 // 浏览器本地存的那份也一起删
+      renderGallery();
+      status.className = 'status';
+      status.textContent = '已删除这张（浏览器本地记录也清了，outputs/ 里的文件不受影响）';
+    };
+    gallery.appendChild(fig);
+  });
+}
+
+$('clearAll').onclick = () => {
+  cache.clear();
+  dbClear();
+  renderGallery();
+  status.className = 'status';
+  status.textContent = '结果列表已清空（浏览器本地记录也清了）';
+};
+
+// 提示词预设放在 web/presets.json（不进代码），按风格分组：写实偏摄影词，二次元偏 danbooru 标签
+let PROMPT_PRESETS = null;
+
+async function loadPromptPresets() {
+  try {
+    const r = await fetch('/presets.json', {cache: 'no-cache'});
+    if (r.ok) PROMPT_PRESETS = await r.json();
+  } catch (e) { /* 拿不到就不显示 chip，不影响出图 */ }
+  renderChips(MODEL.style || 'real');
+}
+
+function renderChips(style) {
+  const box = $('chips');
+  box.innerHTML = '';
+  const list = (PROMPT_PRESETS || {})[style] || (PROMPT_PRESETS || {}).custom || [];
+  list.forEach(p => {
+    const s = document.createElement('span');
+    s.className = 'chip';
+    s.textContent = p.label;
+    s.onclick = () => {
+      $('prompt').value = p.prompt;
+      $('prompt').focus();
+      status.className = 'status';
+      status.textContent = `已载入预设「${p.label}」，可继续修改`;
+    };
+    box.appendChild(s);
+  });
+}
+
+// 当前模型信息：由 scripts/use-model.sh 写进 /model.json
+let MODEL = {style:'real', name:'', steps:28, cfg:6, sampler:'euler_a', negative:''};
+// 运行参数（端口等）来自 manager 的 /manager/state.config，前端不写死
+let APP_CONFIG = {api_port: 18234};
+
+function renderCurlExample() {
+  const style = MODEL.style || 'real';
+  const host = location.hostname || '127.0.0.1';
+  const port = APP_CONFIG.api_port || 18234;
+  const samplePrompt = style === 'anime'
+    ? '1girl, detailed face, soft lighting, illustration'
+    : 'photorealistic portrait, natural light, 85mm lens';
+  $('curl').textContent =
+`curl -s http://${host}:${port}/sdapi/v1/txt2img \\
+  -H 'Content-Type: application/json' \\
+  -d '{"prompt":"${samplePrompt}",
+       "negative_prompt":"${(MODEL.negative || '').slice(0, 48)}…",
+       "width":1024,"height":1024,"steps":${Number(MODEL.steps) || 28},
+       "cfg_scale":${Number(MODEL.cfg) || 6},"sampler_name":"${MODEL.sampler || 'euler_a'}","seed":-1}' \\
+  | python3 -c 'import sys,json,base64;d=json.load(sys.stdin);open("out.png","wb").write(base64.b64decode(d["images"][0]))'`;
+}
+
+async function loadModel() {
+  try {
+    const r = await fetch('/model.json', {cache:'no-store'});
+    if (r.ok) MODEL = Object.assign(MODEL, await r.json());
+  } catch (e) { /* 首次部署可能还没有 model.json，用默认值 */ }
+
+  const style = MODEL.style || 'real';
+  $('styleBadge').className = 'badge ' + style;
+  $('styleBadge').textContent = style === 'anime' ? '二次元' : (style === 'real' ? '写实' : '自定义');
+  $('modelTag').textContent = MODEL.name || MODEL.checkpoint || 'SDXL';
+
+  $('steps').value = Number(MODEL.steps) || 28;
+  $('cfg').value = Number(MODEL.cfg) || 6;
+  if (MODEL.sampler) {
+    const opt = [...$('sampler').options].find(o => o.value === MODEL.sampler);
+    if (opt) $('sampler').value = MODEL.sampler;
+  }
+  $('negative').value = MODEL.negative || '';
+  renderChips(style);
+
+  $('modelbox').innerHTML =
+    `当前模型：<b>${MODEL.name || MODEL.checkpoint || '未知'}</b>` +
+    (MODEL.clip_skip ? ` · clip skip ${MODEL.clip_skip}` : '') +
+    `<br>切换风格：点页头的 <b>写实 / 二次元</b>（约 15 秒，会自动刷新本页参数）；` +
+    `命令行同样可用：<code>./scripts/use-model.sh &lt;id&gt;</code>（id 见 <code>config/models.json</code>）`;
+
+  renderCurlExample();
+  refreshSwitch();
+}
+loadModel();
+loadPromptPresets();
+restoreResults();      // 把上次生成的结果从 IndexedDB 捞回来（刷新/重开浏览器都还在）
+
+let polling = null, pollingActive = false;
+function startPolling(t0) {
+  clearInterval(polling);
+  pollingActive = true;
+  bar.style.display = 'block';
+  polling = setInterval(async () => {
+    if (!pollingActive) return;
+    try {
+      const r = await fetch('/api/sdapi/v1/progress?skip_current_image=true');
+      const p = await r.json();
+      // 请求在途时可能已经出图并停了轮询，这里再确认一次，别把「完成」状态盖回「生成中」
+      if (!pollingActive) return;
+      const pct = Math.max(0, Math.min(1, p.progress || 0)) * 100;
+      barFill.style.width = pct.toFixed(0) + '%';
+      status.className = 'status';
+      status.textContent = `生成中… ${pct.toFixed(0)}%（已用 ${((Date.now()-t0)/1000).toFixed(1)}s）`;
+    } catch (e) { /* 服务忙时忽略 */ }
+  }, 700);
+}
+
+function stopPolling() {
+  pollingActive = false;
+  clearInterval(polling); polling = null;
+  bar.style.display = 'none'; barFill.style.width = '0';
+}
+
+/* ===== 文生图 / 图生图 ===== */
+let MODE = 'txt2img';
+let INIT = null;          // {b64, width, height, name}
+
+function setMode(mode) {
+  MODE = mode;
+  [...$('modeTabs').children].forEach(b => b.classList.toggle('on', b.dataset.mode === mode));
+  $('i2iBox').hidden = mode !== 'img2img';
+  $('sizeRow').hidden = mode === 'img2img';
+  $('maskBox').hidden = mode !== 'img2img' || !INIT;
+  $('go').textContent = mode === 'img2img' ? '重绘图片' : '生成图片';
+  status.className = 'status';
+  status.textContent = mode === 'img2img' ? '上传参考图，再描述想要的画面' : '就绪';
+  go.disabled = false;
+}
+
+[...$('modeTabs').children].forEach(b => b.onclick = () => setMode(b.dataset.mode));
+
+/** 读图 -> 缩到最长边 1280（SDXL 甜点区）-> 留 base64 给接口用 */
+async function loadInitImage(file) {
+  if (!file || !file.type.startsWith('image/')) {
+    status.className = 'status err'; status.textContent = '请选择图片文件'; return;
+  }
+  try {
+    const dataUrl = await new Promise((res, rej) => {
+      const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej;
+      fr.readAsDataURL(file);
+    });
+    const img = await new Promise((res, rej) => {
+      const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = dataUrl;
+    });
+    const MAX = 1280;
+    const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+    const w = Math.max(64, Math.round(img.width * scale / 8) * 8);
+    const h = Math.max(64, Math.round(img.height * scale / 8) * 8);
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+    const out = canvas.toDataURL('image/png');
+    INIT = {b64: out.split(',')[1], width: w, height: h, name: file.name};
+    $('thumb').src = out;
+    $('thumbWrap').hidden = false;
+    $('dropHint').hidden = true;
+    $('initActions').hidden = false;
+    $('thumbMeta').textContent = `${file.name} · ${img.width}×${img.height} → ${w}×${h}`;
+    setupMask();                       // 换图要重开一张空白遮罩
+    status.className = 'status';
+    status.textContent = '参考图已就绪；不涂遮罩=整图重绘，涂了=只改涂到的区域';
+  } catch (e) {
+    status.className = 'status err';
+    status.textContent = '读图失败：' + e.message;
+  }
+}
+
+/* ===== 遮罩：白=重绘，黑=保留（接口的 mask 字段） ===== */
+let maskCanvas = null, maskCtx = null, dispCanvas = null, dispCtx = null;
+let maskBaseImg = null, MASK_DIRTY = false, drawing = false, lastPt = null;
+let shapeStart = null, shapeCur = null, shapeTool = null;
+
+function setupMask() {
+  if (!INIT) return;
+  const w = INIT.width, h = INIT.height;
+
+  maskCanvas = document.createElement('canvas');       // 黑白遮罩，白=重绘
+  maskCanvas.width = w; maskCanvas.height = h;
+  maskCtx = maskCanvas.getContext('2d');
+  maskCtx.fillStyle = '#000';
+  maskCtx.fillRect(0, 0, w, h);
+
+  dispCanvas = $('maskCanvas');                        // 显示层：图 + 半透明遮罩
+  dispCanvas.width = w; dispCanvas.height = h;
+  dispCtx = dispCanvas.getContext('2d');
+
+  maskBaseImg = new Image();
+  maskBaseImg.onload = drawMaskView;
+  maskBaseImg.src = $('thumb').src;
+
+  MASK_DIRTY = false;
+  lastPt = null;
+  shapeStart = shapeCur = null;
+  $('maskBox').hidden = false;
+  bindMaskDrawing();
+}
+
+function drawShapePath(ctx, a, b, tool) {
+  const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
+  const w = Math.abs(a.x - b.x), h = Math.abs(a.y - b.y);
+  ctx.beginPath();
+  if (tool === 'ellipse') ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+  else ctx.rect(x, y, w, h);
+}
+
+function drawMaskView() {
+  if (!dispCanvas) return;
+  const w = dispCanvas.width, h = dispCanvas.height;
+  dispCtx.clearRect(0, 0, w, h);
+  if (maskBaseImg) dispCtx.drawImage(maskBaseImg, 0, 0, w, h);
+  dispCtx.globalAlpha = 0.55;
+  dispCtx.drawImage(maskCanvas, 0, 0);
+  dispCtx.globalAlpha = 1;
+
+  if (shapeStart && shapeCur) {                        // 正在拖的框：虚线预览
+    dispCtx.save();
+    dispCtx.strokeStyle = '#4f8cff';
+    dispCtx.lineWidth = Math.max(2, w / 300);
+    dispCtx.setLineDash([9, 6]);
+    drawShapePath(dispCtx, shapeStart, shapeCur, shapeTool);
+    dispCtx.stroke();
+    dispCtx.restore();
+  }
+}
+
+function maskPoint(ev) {
+  const r = dispCanvas.getBoundingClientRect();
+  const k = dispCanvas.width / r.width;               // 显示尺寸 -> 像素尺寸
+  return {x: (ev.clientX - r.left) * k, y: (ev.clientY - r.top) * k, k};
+}
+
+function paintAt(p) {
+  const erase = $('brushMode').value === 'erase';
+  const radius = Math.max(2, Number($('brushSize').value) * p.k / 2);
+  const color = erase ? '#000' : '#fff';
+  maskCtx.strokeStyle = color;
+  maskCtx.fillStyle = color;
+  maskCtx.lineWidth = radius * 2;
+  maskCtx.lineCap = 'round';
+  maskCtx.lineJoin = 'round';
+  maskCtx.beginPath();
+  maskCtx.moveTo(lastPt ? lastPt.x : p.x, lastPt ? lastPt.y : p.y);
+  maskCtx.lineTo(p.x, p.y);
+  maskCtx.stroke();
+  lastPt = {x: p.x, y: p.y};
+  if (!erase) MASK_DIRTY = true;
+  drawMaskView();
+}
+
+function commitShape() {
+  if (!shapeStart || !shapeCur) return;
+  const w = Math.abs(shapeStart.x - shapeCur.x), h = Math.abs(shapeStart.y - shapeCur.y);
+  if (w < 4 || h < 4) return;                          // 只是点了一下，忽略
+  maskCtx.fillStyle = '#fff';
+  drawShapePath(maskCtx, shapeStart, shapeCur, shapeTool);
+  maskCtx.fill();
+  MASK_DIRTY = true;
+}
+
+function bindMaskDrawing() {
+  dispCanvas.onpointerdown = ev => {
+    const tool = $('brushMode').value;
+    dispCanvas.setPointerCapture(ev.pointerId);
+    if (tool === 'rect' || tool === 'ellipse') {       // 框选：按下开始，松开生效
+      shapeTool = tool;
+      shapeStart = maskPoint(ev);
+      shapeCur = Object.assign({}, shapeStart);
+      drawMaskView();
+      return;
+    }
+    drawing = true;
+    lastPt = null;
+    paintAt(maskPoint(ev));
+  };
+  dispCanvas.onpointermove = ev => {
+    if (shapeStart) { shapeCur = maskPoint(ev); drawMaskView(); return; }
+    if (drawing) paintAt(maskPoint(ev));
+  };
+  dispCanvas.onpointerup = () => {
+    if (shapeStart) {
+      commitShape();
+      shapeStart = shapeCur = null;
+      drawMaskView();
+      status.className = 'status';
+      status.textContent = '遮罩已加上：只有遮罩区域会被重绘，可以继续框选累加';
+    }
+    drawing = false;
+    lastPt = null;
+  };
+  dispCanvas.onpointercancel = () => {
+    drawing = false; lastPt = null; shapeStart = shapeCur = null; drawMaskView();
+  };
+}
+
+$('maskClear').onclick = () => {
+  if (!maskCtx) return;
+  maskCtx.fillStyle = '#000';
+  maskCtx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
+  MASK_DIRTY = false;
+  shapeStart = shapeCur = null;
+  drawMaskView();
+};
+
+const drop = $('drop');
+drop.onclick = () => $('file').click();
+$('file').onchange = e => { if (e.target.files[0]) loadInitImage(e.target.files[0]); };
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => {
+  e.preventDefault(); drop.classList.remove('over');
+  if (e.dataTransfer.files[0]) loadInitImage(e.dataTransfer.files[0]);
+};
+$('denoise').oninput = () => { $('denoiseVal').textContent = Number($('denoise').value).toFixed(2); };
+
+/** 移除参考图：清掉图、遮罩和缩放状态，回到「未上传」 */
+function clearInitImage() {
+  INIT = null;
+  MASK_DIRTY = false;
+  maskCanvas = maskCtx = dispCanvas = dispCtx = maskBaseImg = null;
+  shapeStart = shapeCur = null;
+  drawing = false;
+  lastPt = null;
+  $('file').value = '';
+  $('thumb').removeAttribute('src');
+  $('thumbWrap').hidden = true;
+  $('thumbMeta').textContent = '';
+  $('dropHint').hidden = false;
+  $('initActions').hidden = true;
+  $('maskBox').hidden = true;
+  status.className = 'status';
+  status.textContent = '参考图已移除；可以重新选择或拖入新图';
+  if (typeof setMode === 'function' && MODE === 'img2img') {
+    go.textContent = '重绘图片';
+  }
+}
+
+$('initClear').onclick = ev => {
+  ev.stopPropagation();           // 别冒泡到 drop，否则会同时弹出文件选择框
+  clearInitImage();
+};
+
+go.onclick = async () => {
+  const prompt = $('prompt').value.trim();
+  if (!prompt) { status.className = 'status err'; status.textContent = '请先填写提示词'; return; }
+  const img2img = MODE === 'img2img';
+  if (img2img && !INIT) {
+    status.className = 'status err'; status.textContent = '图生图需要先上传一张参考图'; return;
+  }
+
+  const [width, height] = img2img ? [INIT.width, INIT.height] : $('size').value.split('x').map(Number);
+  const denoise = img2img ? Number($('denoise').value) : null;
+  const body = {
+    prompt,
+    negative_prompt: $('negative').value.trim(),
+    width, height,
+    steps: Number($('steps').value) || 28,
+    cfg_scale: Number($('cfg').value) || 6,
+    sampler_name: $('sampler').value || 'euler_a',
+    batch_size: Number($('batch').value) || 1,
+    seed: Number($('seed').value),
+  };
+  if (img2img) {
+    body.init_images = [INIT.b64];
+    body.denoising_strength = denoise;
+    if (MASK_DIRTY && maskCanvas) {
+      body.mask = maskCanvas.toDataURL('image/png').split(',')[1];
+    }
+  }
+
+  go.disabled = true;
+  const t0 = Date.now();
+  startPolling(t0);
+  try {
+    const res = await fetch(img2img ? '/api/sdapi/v1/img2img' : '/api/sdapi/v1/txt2img', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || data.message || ('HTTP ' + res.status));
+    if (!data.images || !data.images.length) throw new Error('服务未返回图片');
+
+    let info = {};
+    try { info = JSON.parse(data.info || '{}'); } catch (e) {}
+    const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
+    const prefix = img2img ? 'i2i' : (MODEL.style === 'anime' ? 'anime' : 'sdxl');
+    data.images.forEach((b64, i) => {
+      const seed = (info.all_seeds && info.all_seeds[i] !== undefined) ? info.all_seeds[i] : $('seed').value;
+      const blob = b64ToBlob(b64);
+      const id = `${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}`;
+      const entry = {
+        url: URL.createObjectURL(blob),
+        name: `${prefix}_${stamp}_${i}_seed${seed}.png`,
+        label: `${width}×${height} · ${body.steps} 步` +
+               (img2img ? ` · 重绘 ${denoise}${body.mask ? ' · 遮罩' : ''}` : ` · CFG ${body.cfg_scale}`),
+        meta: `seed ${seed}`,
+        id,
+      };
+      cache.add(entry);
+      dbPut({id, name: entry.name, label: entry.label, meta: entry.meta, blob, t: Date.now()});
+    });
+    renderGallery();
+    const secs = ((Date.now() - t0) / 1000).toFixed(1);
+    status.className = 'status ok';
+    status.textContent = `完成：${data.images.length} 张，用时 ${secs}s`;
+  } catch (e) {
+    status.className = 'status err';
+    status.textContent = '失败：' + e.message;
+  } finally {
+    stopPolling();
+    go.disabled = false;
+  }
+};
+
+/* ===== 模型切换：调控制面 /manager（背后是 scripts/use-model.sh） =====
+ * 按钮完全按 /manager/state 返回的模型目录生成，前端不写死 real/anime。 */
+const switchBox = $('modelSwitch'), switchStatus = $('switchStatus');
+let switchState = null;
+
+function renderSwitch(state) {
+  switchState = state;
+  if (state.config) {
+    APP_CONFIG = Object.assign(APP_CONFIG, state.config);   // 端口来自后端，前端不写死
+    renderCurlExample();
+  }
+  const curStyle = state.current && state.current.style;
+  const opts = (state.options || []).filter(o => o.available);
+  if (!opts.length) { switchBox.hidden = true; return; }
+
+  switchBox.hidden = false;
+  switchBox.innerHTML = '';
+  opts.forEach(o => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.target = o.id;
+    b.textContent = o.label || o.name || o.id;
+    b.classList.toggle('on', o.style === curStyle);
+    b.disabled = !!state.busy;
+    b.onclick = () => doSwitch(o.id);
+    switchBox.appendChild(b);
+  });
+
+  if (state.busy) {
+    const target = opts.find(o => o.id === state.target);
+    switchStatus.textContent = `正在切换到${target ? target.label : state.target}…`;
+  } else {
+    switchStatus.textContent = '';
+  }
+}
+
+async function refreshSwitch() {
+  try {
+    const r = await fetch('/manager/state', {cache: 'no-store'});
+    if (!r.ok) throw new Error('http ' + r.status);
+    renderSwitch(await r.json());
+  } catch (e) {
+    switchBox.hidden = true;   // 没有 manager 时退回纯命令行，不显示假按钮
+  }
+}
+
+async function doSwitch(target) {
+  if (switchState && switchState.busy) return;
+  go.disabled = true;
+  switchBox.querySelectorAll('button').forEach(b => b.disabled = true);
+  switchStatus.textContent = '切换中…';
+  status.className = 'status';
+  status.textContent = '正在切换模型：重建容器 + 加载权重，约 15 秒';
+  try {
+    const r = await fetch('/manager/switch', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({target})
+    });
+    const started = await r.json();
+    if (!r.ok) throw new Error(started.error || ('HTTP ' + r.status));
+
+    const t0 = Date.now();
+    while (Date.now() - t0 < 360000) {
+      await new Promise(res => setTimeout(res, 1500));
+      const st = await (await fetch('/manager/state', {cache: 'no-store'})).json();
+      renderSwitch(st);
+      if (!st.busy) {
+        if (st.error) throw new Error(st.error.split('\n').filter(Boolean).slice(-2).join(' '));
+        await loadModel();        // 重新拉 model.json：预设、默认值、API 示例一起换
+        status.className = 'status ok';
+        status.textContent = `已切换到 ${(st.current && st.current.name) || target}`;
+        return;
+      }
+      status.textContent = `正在切换模型…（${Math.round((Date.now() - t0) / 1000)}s）`;
+    }
+    throw new Error('切换超时，看 docker compose logs sd-server');
+  } catch (e) {
+    status.className = 'status err';
+    status.textContent = '切换失败：' + e.message;
+    switchStatus.textContent = '';
+  } finally {
+    go.disabled = false;
+    refreshSwitch();
+  }
+}
+
+refreshSwitch();
+
+let SAVED_PRESETS = [];
+
+function currentParams() {
+  const [width, height] = $('size').value.split('x').map(Number);
+  return {
+    mode: MODE,
+    prompt: $('prompt').value,
+    negative: $('negative').value,
+    width, height,
+    steps: Number($('steps').value) || 28,
+    cfg: Number($('cfg').value) || 6,
+    sampler: $('sampler').value,
+    batch: Number($('batch').value) || 1,
+    denoise: Number($('denoise').value),
+  };
+}
+
+function applyParams(p) {
+  if (p.mode === 'img2img' || p.mode === 'txt2img') setMode(p.mode);
+  if (typeof p.prompt === 'string') $('prompt').value = p.prompt;
+  if (typeof p.negative === 'string') $('negative').value = p.negative;
+  if (p.width && p.height) {
+    const v = `${p.width}x${p.height}`;
+    if (![...$('size').options].some(o => o.value === v)) {
+      $('size').appendChild(new Option(`${p.width}×${p.height} · 来自预设`, v));
+    }
+    $('size').value = v;
+  }
+  if (p.steps) $('steps').value = p.steps;
+  if (p.cfg) $('cfg').value = p.cfg;
+  if (p.sampler && [...$('sampler').options].some(o => o.value === p.sampler)) $('sampler').value = p.sampler;
+  if (p.batch) $('batch').value = p.batch;
+  if (p.denoise) {
+    $('denoise').value = p.denoise;
+    $('denoiseVal').textContent = Number(p.denoise).toFixed(2);
+  }
+}
+
+async function loadPresets() {
+  try {
+    const r = await fetch('/manager/presets', {cache: 'no-store'});
+    if (!r.ok) throw new Error('http ' + r.status);
+    SAVED_PRESETS = (await r.json()).presets || [];
+  } catch (e) {
+    SAVED_PRESETS = [];
+  }
+  const sel = $('presetSel');
+  const keep = sel.value;
+  sel.innerHTML = '';
+  if (!SAVED_PRESETS.length) {
+    sel.appendChild(new Option('（还没有保存的配置）', ''));
+    return;
+  }
+  SAVED_PRESETS.forEach(p => sel.appendChild(new Option(p.name, p.name)));
+  if (keep && SAVED_PRESETS.some(p => p.name === keep)) sel.value = keep;
+}
+
+$('presetSave').onclick = async () => {
+  const name = $('presetName').value.trim() || $('presetSel').value;
+  if (!name) {
+    status.className = 'status err';
+    status.textContent = '先给配置起个名字（填在左边输入框）';
+    return;
+  }
+  try {
+    const r = await fetch('/manager/presets', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name, params: currentParams()})
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    await loadPresets();
+    $('presetSel').value = name;
+    status.className = 'status ok';
+    status.textContent = `已保存配置「${name}」`;
+  } catch (e) {
+    status.className = 'status err';
+    status.textContent = '保存配置失败：' + e.message;
+  }
+};
+
+$('presetApply').onclick = () => {
+  const p = SAVED_PRESETS.find(x => x.name === $('presetSel').value);
+  if (!p) {
+    status.className = 'status err';
+    status.textContent = '先在下拉框里选一个配置';
+    return;
+  }
+  applyParams(p.params || {});
+  status.className = 'status ok';
+  status.textContent = `已应用配置「${p.name}」`;
+};
+
+$('presetDel').onclick = async () => {
+  const name = $('presetSel').value;
+  if (!name) {
+    status.className = 'status err';
+    status.textContent = '先在下拉框里选一个配置';
+    return;
+  }
+  try {
+    const r = await fetch('/manager/presets/delete', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name})
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status));
+    $('presetName').value = '';
+    await loadPresets();
+    status.className = 'status ok';
+    status.textContent = `已删除配置「${name}」`;
+  } catch (e) {
+    status.className = 'status err';
+    status.textContent = '删除配置失败：' + e.message;
+  }
+};
+
+loadPresets();
+</script>
+</body>
+</html>

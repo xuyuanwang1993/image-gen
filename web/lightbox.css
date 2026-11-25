@@ -1,0 +1,107 @@
+/* 结果缩略图条 + 双击放大看原图（生图页 / 流程图页共用） */
+
+/* ---------- 缩略图条 ---------- */
+.strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+  align-content: flex-start;
+}
+.strip .item {
+  margin: 0;
+  width: 108px;
+  border: 1px solid #2b303b;
+  border-radius: 10px;
+  background: #12151b;
+  overflow: hidden;
+  cursor: zoom-in;
+  transition: border-color .15s, transform .15s;
+}
+.strip .item:hover { border-color: #4f8cff; transform: translateY(-1px); }
+.strip .item.on { border-color: #4f8cff; box-shadow: 0 0 0 1px #4f8cff inset; }
+.strip .item img {
+  width: 100%;
+  height: 76px;
+  object-fit: contain;
+  background: #fff;
+  display: block;
+}
+.strip .item figcaption {
+  font-size: 11px;
+  line-height: 1.5;
+  color: #98a0ae;
+  padding: 4px 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.strip .item figcaption a { color: #4f8cff; text-decoration: none; }
+/* 生图页用大一点的缩略图 */
+.strip.big .item { width: 176px; }
+.strip.big .item img { height: 132px; }
+.strip .empty { font-size: 12px; color: #98a0ae; padding: 12px 0; }
+
+.hint-dbl { font-size: 12px; color: #98a0ae; margin-top: 10px; }
+.hint-dbl b { color: #e8ebf1; font-weight: 600; }
+
+/* ---------- 原图查看器 ---------- */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+  display: none;
+  overflow: auto;
+  padding: 60px 24px 40px;
+  background: rgba(6, 8, 12, .93);
+}
+.lightbox.on { display: block; }
+.lightbox img {
+  display: block;
+  margin: 0 auto;
+  max-width: none;          /* 关键：不缩放，按原始像素显示 */
+  background: #fff;
+  border-radius: 6px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .55);
+}
+.lightbox .bar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  background: rgba(10, 12, 17, .96);
+  border-bottom: 1px solid #2b303b;
+  color: #e8ebf1;
+  font-size: 13px;
+}
+.lightbox .bar .grow {
+  flex: 1;
+  min-width: 0;
+  color: #98a0ae;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lightbox .bar a,
+.lightbox .bar button {
+  background: #1e222b;
+  border: 1px solid #2b303b;
+  color: #e8ebf1;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font: 500 13px/1 inherit;
+  cursor: pointer;
+  text-decoration: none;
+}
+.lightbox .bar a:hover,
+.lightbox .bar button:hover { border-color: #4f8cff; }
+.lightbox .tip {
+  position: fixed;
+  bottom: 14px; left: 0; right: 0;
+  text-align: center;
+  font-size: 12px;
+  color: #98a0ae;
+}

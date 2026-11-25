@@ -1,0 +1,20 @@
+{
+  "real": [
+    {"label": "人像特写", "prompt": "close-up portrait of a woman in her 30s, soft window light from the side, 85mm lens, shallow depth of field, detailed skin texture, natural makeup, subtle film grain, photorealistic"},
+    {"label": "环境人像", "prompt": "full body photograph of a person standing in a sunlit loft apartment, editorial fashion photography, 35mm film, natural light, high detail, soft shadows"},
+    {"label": "室内场景", "prompt": "interior photograph of a modern bedroom at golden hour, large windows, linen textures, warm light, architectural photography, wide angle"},
+    {"label": "产品静物", "prompt": "product photograph of a matte black wireless headphone on a concrete surface, studio softbox lighting, macro detail, commercial advertising photo"},
+    {"label": "电影感夜景", "prompt": "cinematic night street photograph, neon reflections on wet asphalt, anamorphic lens flare, shallow depth of field, 35mm, moody atmosphere"}
+  ],
+  "anime": [
+    {"label": "角色立绘", "prompt": "1girl, full body, standing, detailed face, beautiful eyes, intricate outfit, dynamic pose, best quality, highres, soft lighting, illustration"},
+    {"label": "头像半身", "prompt": "1girl, upper body, looking at viewer, gentle smile, detailed eyes, soft rim light, cherry blossoms background, anime illustration"},
+    {"label": "动漫场景", "prompt": "scenery, sunset over city rooftops, dramatic clouds, lens flare, anime background art, no humans, highly detailed"},
+    {"label": "赛璐璐插画", "prompt": "1girl, cel shading, bold lineart, vivid colors, dramatic angle, anime key visual"},
+    {"label": "厚涂风格", "prompt": "1girl, painterly, thick brush strokes, soft color palette, atmospheric lighting, fantasy illustration, highly detailed"}
+  ],
+  "custom": [
+    {"label": "人像", "prompt": "photorealistic portrait, natural light, detailed skin texture, shallow depth of field"},
+    {"label": "场景", "prompt": "photorealistic environment, natural light, wide angle, high detail"}
+  ]
+}
