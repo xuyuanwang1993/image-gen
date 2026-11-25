@@ -63,6 +63,7 @@
   .chip{font-size:12px;padding:4px 9px;border-radius:999px;background:var(--panel2);
         border:1px solid var(--line);color:var(--dim);cursor:pointer}
   .chip:hover{border-color:var(--accent);color:var(--txt)}
+  .chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
   button{width:100%;margin-top:16px;padding:11px;border:0;border-radius:9px;cursor:pointer;
          background:var(--accent);color:#fff;font:600 14px/1 inherit}
   button:disabled{opacity:.55;cursor:not-allowed}
@@ -174,21 +175,10 @@
       <div id="maskBox" hidden>
         <label style="margin-top:12px">遮罩 <span class="sub">（推荐直接「自动选区」；也可框选/画笔精修）</span></label>
         <div class="row" style="margin-bottom:8px">
-          <select id="segClass">
-            <option value="auto" selected>自动（衣物）</option>
-            <option value="upper">上衣</option>
-            <option value="lower">下装（裤/裙）</option>
-            <option value="dress">连衣裙</option>
-            <option value="garment">整套衣物</option>
-            <option value="shoes">鞋</option>
-            <option value="person">人物（整体）</option>
-            <option value="skin">皮肤（脸/手/腿）</option>
-            <option value="hair">头发</option>
-            <option value="accessory">配饰（包/帽/围巾）</option>
-            <option value="background">背景</option>
-          </select>
           <button type="button" class="mini" id="segBtn" style="flex:0 0 auto">自动选区</button>
+          <span class="hint" id="segHint" style="margin-left:8px;display:inline">识别后可多选，勾中即为并集</span>
         </div>
+        <div class="chips" id="segChips" hidden></div>
         <div class="mask-wrap"><canvas id="maskCanvas"></canvas></div>
         <div class="row" style="margin-top:8px">
           <div>
@@ -618,6 +608,11 @@ function setupMask() {
   MASK_DIRTY = false;
   lastPt = null;
   shapeStart = shapeCur = null;
+  SEG_DATA = null;
+  SEG_ACTIVE.clear();
+  SEG_IMAGES.clear();
+  $('segChips').hidden = true;
+  $('segChips').innerHTML = '';
   $('maskBox').hidden = false;
   bindMaskDrawing();
 }
@@ -839,6 +834,58 @@ function pickSegClass(data, wanted) {
   return {key: '', note: `没识别到${SEG_LABELS[wanted] || wanted}，试试「人物」或手动框选`};
 }
 
+let SEG_DATA = null;
+const SEG_ACTIVE = new Set();
+const SEG_IMAGES = new Map();
+
+async function segMaskImage(key) {
+  if (SEG_IMAGES.has(key)) return SEG_IMAGES.get(key);
+  const img = await new Promise((resolve, reject) => {
+    const i = new Image();
+    i.onload = () => resolve(i);
+    i.onerror = reject;
+    i.src = 'data:image/png;base64,' + SEG_DATA.masks[key];
+  });
+  SEG_IMAGES.set(key, img);
+  return img;
+}
+
+function renderSegChips() {
+  const box = $('segChips');
+  if (!SEG_DATA) { box.hidden = true; box.innerHTML = ''; return; }
+  box.hidden = false;
+  box.innerHTML = '';
+  ['garment', 'upper', 'lower', 'dress', 'shoes', 'accessory',
+   'person', 'skin', 'hair', 'background'].forEach(key => {
+    const r = SEG_DATA.ratios[key] || 0;
+    const c = document.createElement('span');
+    c.className = 'chip' + (SEG_ACTIVE.has(key) ? ' on' : '');
+    c.textContent = `${SEG_LABELS[key]} ${r}%`;
+    c.onclick = async () => {
+      if (SEG_ACTIVE.has(key)) SEG_ACTIVE.delete(key); else SEG_ACTIVE.add(key);
+      renderSegChips();
+      await applySegMask();
+    };
+    box.appendChild(c);
+  });
+}
+
+async function applySegMask() {
+  maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
+  for (const key of SEG_ACTIVE) {
+    maskCtx.globalCompositeOperation = 'source-over';
+    maskCtx.drawImage(await segMaskImage(key), 0, 0, maskCanvas.width, maskCanvas.height);
+  }
+  maskCtx.globalCompositeOperation = 'source-over';
+  MASK_DIRTY = SEG_ACTIVE.size > 0;
+  shapeStart = shapeCur = null;
+  drawMaskView();
+  status.className = SEG_ACTIVE.size ? 'status ok' : 'status err';
+  status.textContent = SEG_ACTIVE.size
+    ? `已选中 ${SEG_ACTIVE.size} 个区域：${[...SEG_ACTIVE].map(k => SEG_LABELS[k]).join(' + ')}`
+    : '没有选中任何区域';
+}
+
 async function requestSegments() {
   const key = segCacheKey();
   if (SEG_CACHE.key === key && SEG_CACHE.data) return SEG_CACHE.data;
@@ -870,45 +917,21 @@ $('segBtn').onclick = async () => {
     status.textContent = '先上传参考图';
     return;
   }
-  const wanted = $('segClass').value;
   const btn = $('segBtn');
   btn.disabled = true;
   status.className = 'status';
   status.textContent = '正在识别…（首次需要加载模型，约 10~20 秒）';
   try {
-    const data = await requestSegments();
+    SEG_DATA = await requestSegments();
 
-    // 把占比写回下拉，让用户一眼看到哪一类在这张图里是空的
-    [...$('segClass').options].forEach(o => {
-      if (o.value === 'auto') return;
-      const r = data.ratios[o.value];
-      if (typeof r === 'number') o.textContent = `${SEG_LABELS[o.value]} ${r}%`;
-    });
-
-    const pick = pickSegClass(data, wanted);
-    if (!pick.key) {
-      status.className = 'status err';
-      status.textContent = pick.note;
-      return;
+    // 第一次识别时自动挑一个"有内容"的衣物类；之后用户可以点 chip 自由多选
+    if (!SEG_ACTIVE.size) {
+      const pick = pickSegClass(SEG_DATA, 'auto');
+      if (pick.key) SEG_ACTIVE.add(pick.key);
     }
-    const cls = pick.key;
-
-    const maskImg = await new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = reject;
-      img.src = 'data:image/png;base64,' + data.masks[cls];
-    });
-    // 遮罩画布是透明底：先清空再画（服务端给的是带 alpha 的白色选区）
-    maskCtx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
-    maskCtx.drawImage(maskImg, 0, 0, maskCanvas.width, maskCanvas.height);
-    MASK_DIRTY = true;
-    shapeStart = shapeCur = null;
-    drawMaskView();
-    status.className = 'status ok';
-    status.textContent = `已选中${SEG_LABELS[cls] || cls}（${data.ratios[cls]}%）`
-      + (pick.note ? `；${pick.note}` : '')
-      + `，识别 ${data.ms}ms`;
+    renderSegChips();
+    await applySegMask();
+    status.textContent += `，识别 ${SEG_DATA.ms}ms`;
   } catch (e) {
     status.className = 'status err';
     status.textContent = '自动选区失败：' + e.message;
