@@ -70,14 +70,6 @@ ok "PROJECT_DIR=$ROOT"
 # web/ 是只读挂载进 nginx 的：文件必须全局可读，否则页面/静态 JSON 会 403
 chmod -R a+rX web config 2>/dev/null || true
 
-# 若 .env 里还没有当前模型（首次部署），用目录里第一个已下载的模型初始化
-if ! grep -qE '^SD_MODEL_FILE=.+' .env; then
-  first_id="$(python3 scripts/catalog.py ids | awk '{print $1}')"
-  if [[ -n "$first_id" ]] && [[ -f "models/checkpoints/$(python3 scripts/catalog.py field "$first_id" file)" ]]; then
-    ok "初始化当前模型为 $first_id"
-  fi
-fi
-
 # ---------------------------------------------------------------------------
 step "3/6 准备镜像"
 # ---------------------------------------------------------------------------
@@ -110,6 +102,22 @@ else
   python3 scripts/catalog.py list
   echo
   ./scripts/download-models.sh
+fi
+
+# 首次部署：.env 里没有当前模型时，自动选目录里第一个已下载的条目
+current_model="$(grep -E '^SD_MODEL_FILE=' .env | tail -1 | cut -d= -f2- | tr -d '"' || true)"
+if [[ -z "$current_model" ]]; then
+  first_id=""
+  for id in $(python3 scripts/catalog.py ids); do
+    f="$(python3 scripts/catalog.py field "$id" file 2>/dev/null || true)"
+    if [[ -n "$f" && -f "models/checkpoints/$f" ]]; then first_id="$id"; break; fi
+  done
+  [[ -n "$first_id" ]] || die "没有任何可用权重（models/checkpoints/ 为空）：先跑 ./scripts/download-models.sh"
+  echo "  .env 里还没有当前模型，初始化为 $first_id"
+  ./scripts/use-model.sh "$first_id" >/dev/null
+  ok "当前模型 = $first_id"
+else
+  ok "当前模型：$current_model"
 fi
 
 # ---------------------------------------------------------------------------
